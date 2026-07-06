@@ -1132,6 +1132,7 @@ function sparklinePath(closes){
   closes.forEach((c,i)=>{
     const x=i*step, y=h-((c-min)/range)*h;
     d += (i===0?"M":"L")+x.toFixed(2)+","+y.toFixed(2)+" ";
+    
   });
   return d;
 }

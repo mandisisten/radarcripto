@@ -1,0 +1,1385 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radar Cripto Sinais • Binance Futures 15m</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#111826; --panel2:#151d2e; --border:#1f2937;
+    --text:#e5eaf1; --muted:#8291a8; --green:#16c784; --green-d:#0d3d2c;
+    --red:#ea3943; --red-d:#3d1418; --yellow:#f0b90b; --blue:#4f8ff7;
+    --mono:'Consolas','SFMono-Regular',Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Roboto,Arial,sans-serif;font-size:14px;}
+  header{padding:14px 20px;background:linear-gradient(180deg,#111826,#0a0e14);border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:20;}
+  header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.3px;}
+  header h1 span{color:var(--yellow);}
+  .status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red);}
+  .dot.on{background:var(--green);box-shadow:0 0 6px var(--green);}
+  .controls{margin-left:auto;display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);}
+  .controls label{display:flex;align-items:center;gap:6px;}
+  .controls input[type=range]{width:100px;}
+  .controls select,.controls button{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;cursor:pointer;}
+  .controls button:hover{border-color:var(--blue);}
+  .disclaimer{background:#241a05;border-bottom:1px solid #4a3a0a;color:#f0c15c;font-size:11.5px;padding:7px 20px;line-height:1.5;}
+  main{padding:16px 20px 60px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:22px;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px;position:relative;overflow:hidden;transition:border-color .3s;}
+  .card.long{border-color:rgba(22,199,132,.55);}
+  .card.short{border-color:rgba(234,57,67,.55);}
+  .card-top{display:flex;justify-content:space-between;align-items:baseline;}
+  .sym{font-weight:700;font-size:15px;}
+  .sym small{color:var(--muted);font-weight:400;font-size:11px;}
+  .price{font-family:var(--mono);font-size:17px;font-weight:600;transition:color .25s;}
+  .price.up{color:var(--green);} .price.down{color:var(--red);}
+  .sub-row{display:flex;justify-content:space-between;color:var(--muted);font-size:11.5px;margin-top:2px;}
+  .chg-pos{color:var(--green);} .chg-neg{color:var(--red);}
+  .spark{width:100%;height:34px;margin:8px 0 4px;}
+  .badge{display:inline-block;padding:3px 9px;border-radius:5px;font-weight:700;font-size:11.5px;letter-spacing:.4px;}
+  .badge.LONG{background:var(--green-d);color:var(--green);}
+  .badge.SHORT{background:var(--red-d);color:var(--red);}
+  .badge.NEUTRO{background:#1c2433;color:var(--muted);}
+  .conf{font-family:var(--mono);font-size:12px;color:var(--muted);}
+  .conf b{color:var(--text);}
+  .ind-row{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}
+  .chip{font-size:10.5px;padding:2px 6px;border-radius:4px;background:#1a2233;color:var(--muted);border:1px solid var(--border);}
+  .chip.up{color:var(--green);border-color:rgba(22,199,132,.3);}
+  .chip.down{color:var(--red);border-color:rgba(234,57,67,.3);}
+  .trade-box{margin-top:8px;padding:8px 10px;background:var(--panel2);border-radius:7px;font-family:var(--mono);font-size:11.5px;display:none;}
+  .trade-box.show{display:block;}
+  .trade-row{display:flex;justify-content:space-between;padding:1px 0;}
+  .trade-row .lbl{color:var(--muted);}
+  .footer-card{color:var(--muted);font-size:10.5px;margin-top:6px;display:flex;justify-content:space-between;}
+  h2.section{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 10px;display:flex;align-items:center;gap:8px;}
+  h2.section::after{content:'';flex:1;height:1px;background:var(--border);}
+  .log{background:var(--panel);border:1px solid var(--border);border-radius:10px;max-height:320px;overflow-y:auto;}
+  .log-item{display:flex;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center;}
+  .log-item:last-child{border-bottom:none;}
+  .log-time{color:var(--muted);font-family:var(--mono);font-size:11px;min-width:64px;}
+  .log-empty{padding:20px;color:var(--muted);text-align:center;font-size:12.5px;}
+  .loading{padding:60px 0;text-align:center;color:var(--muted);}
+
+  .trade-summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+  .ts-item{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 16px;flex:1;min-width:150px;text-align:center;}
+  .ts-num{display:block;font-family:var(--mono);font-size:20px;font-weight:700;}
+  .ts-num.up{color:var(--green);} .ts-num.down{color:var(--red);}
+  .ts-lbl{display:block;color:var(--muted);font-size:11px;margin-top:3px;}
+  .trade-table-wrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow-x:auto;}
+  .trade-table{width:100%;border-collapse:collapse;font-size:12.5px;white-space:nowrap;}
+  .trade-table th{text-align:left;padding:10px 14px;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);}
+  .trade-table td{padding:9px 14px;border-bottom:1px solid var(--border);}
+  .trade-table tr:last-child td{border-bottom:none;}
+  .spinner{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;
+    animation:spin 0.8s linear infinite;margin:0 auto 12px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  ::-webkit-scrollbar{width:8px;} ::-webkit-scrollbar-thumb{background:#2a3548;border-radius:4px;}
+
+  /* ---- Auth ---- */
+  #authOverlay{position:fixed;inset:0;background:radial-gradient(circle at 50% 20%,#111a2b,#05070c 70%);
+    display:flex;align-items:center;justify-content:center;z-index:100;padding:20px;}
+  .auth-card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:28px 26px;width:100%;max-width:340px;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);}
+  .auth-card h2{margin:0 0 4px;font-size:19px;}
+  .auth-card p.hint{color:var(--muted);font-size:12px;margin:0 0 18px;line-height:1.5;}
+  .auth-field{margin-bottom:12px;}
+  .auth-field label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:5px;}
+  .auth-field input{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);
+    border-radius:7px;padding:9px 10px;font-size:13.5px;}
+  .auth-field input:focus{outline:none;border-color:var(--blue);}
+  .auth-btn{width:100%;background:var(--blue);color:#fff;border:none;border-radius:7px;padding:10px;font-size:13.5px;
+    font-weight:600;cursor:pointer;margin-top:6px;}
+  .auth-btn:hover{filter:brightness(1.1);}
+  .auth-btn.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border);}
+  .auth-error{color:var(--red);font-size:12px;margin:8px 0 0;min-height:14px;}
+  .auth-switch{text-align:center;font-size:11.5px;color:var(--muted);margin-top:14px;}
+  .auth-switch a{color:var(--blue);cursor:pointer;text-decoration:none;}
+
+  .user-chip{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);}
+  .user-chip .role-badge{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;letter-spacing:.3px;}
+  .role-badge.master{background:#3a2a05;color:var(--yellow);}
+  .role-badge.guest{background:#1c2433;color:var(--muted);}
+  .controls button.icon-btn{padding:5px 9px;}
+  .controls select:disabled,.controls input:disabled,.controls button:disabled{opacity:.4;cursor:not-allowed;}
+
+  .modal-overlay{position:fixed;inset:0;background:rgba(4,6,10,.65);display:flex;align-items:center;justify-content:center;z-index:90;padding:20px;}
+  .modal-box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px 24px;width:100%;max-width:440px;max-height:85vh;overflow-y:auto;}
+  .modal-box h3{margin:0 0 4px;font-size:16px;}
+  .modal-box p.hint{color:var(--muted);font-size:11.5px;line-height:1.5;margin:0 0 16px;}
+  .modal-close{float:right;background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;}
+  .new-guest-form{display:flex;gap:8px;margin-bottom:16px;}
+  .new-guest-form input{flex:1;background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:8px 10px;font-size:13px;}
+  .new-guest-form button{background:var(--blue);color:#fff;border:none;border-radius:7px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .reveal-box{background:var(--panel2);border:1px dashed var(--blue);border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px;}
+  .reveal-box .row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0;}
+  .reveal-box code{font-family:var(--mono);background:#0c1220;padding:3px 7px;border-radius:5px;font-size:12px;word-break:break-all;}
+  .reveal-box button{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:4px 8px;font-size:11px;cursor:pointer;}
+  .reveal-box .warn{color:var(--yellow);font-size:11px;margin-top:8px;}
+  .guest-list-item{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
+  .guest-list-item:last-child{border-bottom:none;}
+  .guest-list-item .glabel{font-weight:600;}
+  .guest-list-item .gmeta{color:var(--muted);font-size:10.5px;}
+  .guest-list-item .gactions{display:flex;gap:6px;align-items:center;}
+  .status-pill{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;}
+  .status-pill.active{background:var(--green-d);color:var(--green);}
+  .status-pill.revoked{background:var(--red-d);color:var(--red);}
+  .guest-list-item button{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:4px 9px;font-size:11px;cursor:pointer;}
+  .empty-guests{color:var(--muted);font-size:12px;text-align:center;padding:14px 0;}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--blue);
+    color:var(--text);padding:10px 18px;border-radius:8px;font-size:12.5px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.4);}
+</style>
+</head>
+<body>
+
+<div id="authOverlay" style="display:none"></div>
+
+<header>
+  <h1>⚡ Radar <span>Cripto Sinais</span></h1>
+  <div class="status"><div class="dot" id="wsDot"></div><span id="wsStatus">conectando…</span></div>
+  <div class="status">📡 <span id="symCount">0</span> pares monitorados</div>
+  <div class="controls">
+    <label>Timeframe
+      <select id="tfSel">
+        <option value="15m">15m • Scalp</option>
+        <option value="4h">4h • Swing</option>
+      </select>
+    </label>
+    <label>Confiança mín.
+      <input type="range" id="confSlider" min="55" max="90" value="70" step="5">
+      <b id="confVal">70%</b>
+    </label>
+    <label><input type="checkbox" id="soundToggle"> 🔔 som</label>
+    <select id="sortSel">
+      <option value="conf">Ordenar: Confiança</option>
+      <option value="chg">Ordenar: Variação 24h</option>
+      <option value="vol">Ordenar: Volume</option>
+      <option value="alpha">Ordenar: A-Z</option>
+    </select>
+    <button id="refreshBtn">↻ Re-varrer lista</button>
+    <button id="usersBtn" class="icon-btn" style="display:none">👤 Usuários</button>
+    <div class="user-chip" id="userChip" style="display:none">
+      <span id="userLabel"></span><span class="role-badge" id="userRoleBadge"></span>
+      <button id="changePasswordBtn" class="icon-btn" title="Trocar senha">🔑</button>
+      <button id="logoutBtn" class="icon-btn" title="Sair">⏻</button>
+    </div>
+  </div>
+</header>
+
+<div class="modal-overlay" id="pwdModal" style="display:none">
+  <div class="modal-box" style="max-width:340px">
+    <button class="modal-close" id="closePwdModal">✕</button>
+    <h3>Trocar senha</h3>
+    <p class="hint">Troca a senha da sua própria conta.</p>
+    <form id="pwdForm">
+      <div class="auth-field"><label>Senha atual</label><input type="password" id="pwdCurrent" autocomplete="current-password" required></div>
+      <div class="auth-field"><label>Nova senha</label><input type="password" id="pwdNew" autocomplete="new-password" required minlength="6"></div>
+      <div class="auth-field"><label>Confirmar nova senha</label><input type="password" id="pwdNew2" autocomplete="new-password" required minlength="6"></div>
+      <button type="submit" class="auth-btn">Salvar nova senha</button>
+      <p class="auth-error" id="pwdErr"></p>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="usersModal" style="display:none">
+  <div class="modal-box">
+    <button class="modal-close" id="closeUsersModal">✕</button>
+    <h3>Gerenciar usuários</h3>
+    <p class="hint">Usuários cadastrados têm acesso completo às opções de análise (timeframe, confiança mínima, ordenação); só não podem gerenciar outros usuários. Login funciona direto com usuário/senha em qualquer dispositivo. Revogar bloqueia o acesso instantaneamente em qualquer lugar, mesmo com o app já aberto.</p>
+    <div class="new-guest-form">
+      <input type="text" id="newGuestLabel" placeholder="Nome do usuário (ex: João)">
+      <button id="createGuestBtn">+ Criar acesso</button>
+    </div>
+    <div id="revealBox"></div>
+    <div id="guestList"></div>
+  </div>
+</div>
+
+<main>
+  <div id="loadingBox" class="loading">
+    <div class="spinner"></div>
+    Varrendo Binance Futures e selecionando os pares com maior "octanagem" (volatilidade × liquidez)…
+  </div>
+
+  <div id="content" style="display:none">
+    <h2 class="section">Painel de Ativos — Gráfico <span id="tfLabel">15m</span></h2>
+    <div class="grid" id="grid"></div>
+
+    <h2 class="section">Log de Sinais</h2>
+    <div class="log" id="log"><div class="log-empty">Aguardando sinais com confluência ≥ confiança mínima…</div></div>
+
+    <h2 class="section">Diário de Trades</h2>
+    <p class="hint" style="margin:-6px 0 12px;">Todo sinal disparado entra aqui e é acompanhado em tempo real até bater o alvo ou o stop. Fica salvo só neste navegador.</p>
+    <div class="trade-summary" id="tradeSummary"></div>
+    <div class="trade-table-wrap">
+      <table class="trade-table">
+        <thead><tr><th>Símbolo</th><th>Direção</th><th>Entrada</th><th>Conf.</th><th>Status</th><th>Resultado</th><th>Aberto em</th></tr></thead>
+        <tbody id="tradeTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ========================= AUTH (Firebase Auth + Firestore) =========================
+   Autenticação de verdade: usuários e senhas ficam no Firebase, não mais no localStorage
+   do navegador. Login com usuário/senha funciona em qualquer dispositivo direto (sem link
+   de convite), e revogar um usuário derruba o acesso instantaneamente em qualquer lugar
+   (checagem em tempo real no Firestore). As regras de segurança do Firestore (configuradas
+   à parte, no console do Firebase) impedem que qualquer usuário se autopromova a master ou
+   leia/edite dados de outra conta — a validação real acontece no servidor do Google, não
+   só no código-fonte.
+*/
+const firebaseConfig = {
+  apiKey: "AIzaSyDtUfC1WSXlzQRdeKRjHd6sYR5jS5eDn1k",
+  authDomain: "radar-cripto-d8cc2.firebaseapp.com",
+  projectId: "radar-cripto-d8cc2",
+  storageBucket: "radar-cripto-d8cc2.firebasestorage.app",
+  messagingSenderId: "556918623875",
+  appId: "1:556918623875:web:6383d5ed8a3997f73995b6"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const USERNAME_DOMAIN = "@scalpradar.local"; // usuário digitado vira um e-mail fake internamente pro Firebase Auth
+function sanitizeUsername(u){ return String(u).trim().toLowerCase().replace(/[^a-z0-9_-]/g,''); }
+function toEmail(username){ return sanitizeUsername(username)+USERNAME_DOMAIN; }
+function randomSuffix(len){
+  const chars = "abcdefghijkmnpqrstuvwxyz23456789";
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b=>chars[b%chars.length]).join('');
+}
+function randomPassword(len=10){
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b=>chars[b%chars.length]).join('');
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function showToast(msg){
+  const t = document.createElement('div');
+  t.className='toast'; t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 3500);
+}
+
+function authErrorMessage(err){
+  const map = {
+    'auth/user-not-found':'Usuário ou senha inválidos.',
+    'auth/wrong-password':'Usuário ou senha inválidos.',
+    'auth/invalid-credential':'Usuário ou senha inválidos.',
+    'auth/invalid-email':'Usuário inválido.',
+    'auth/email-already-in-use':'Esse nome de usuário já está em uso.',
+    'auth/weak-password':'Senha muito curta (mínimo 6 caracteres).',
+    'auth/too-many-requests':'Muitas tentativas. Aguarde um pouco e tente de novo.'
+  };
+  return map[err.code] || ('Erro: '+err.message);
+}
+
+let revokeUnsub = null; // cancela o listener de revogação em tempo real ao sair
+let currentUserData = null; // dados do usuário logado (username/label/role), usado na troca de senha
+
+function renderAuthOverlay(mode, errorMsg){
+  const overlay = document.getElementById('authOverlay');
+  overlay.style.display='flex';
+  if(mode==='setup'){
+    overlay.innerHTML = `
+      <div class="auth-card">
+        <h2>⚡ Radar Cripto Sinais</h2>
+        <p class="hint">Primeiro acesso: crie a conta <b>master</b>. Ela poderá criar outros acessos depois.</p>
+        <form id="setupForm">
+          <div class="auth-field"><label>Usuário master</label><input type="text" id="setupUser" autocomplete="username" required></div>
+          <div class="auth-field"><label>Senha</label><input type="password" id="setupPass" autocomplete="new-password" required minlength="6"></div>
+          <div class="auth-field"><label>Confirmar senha</label><input type="password" id="setupPass2" autocomplete="new-password" required minlength="6"></div>
+          <button type="submit" class="auth-btn">Criar conta master</button>
+          <p class="auth-error" id="authErr">${errorMsg||''}</p>
+        </form>
+      </div>`;
+    document.getElementById('setupForm').addEventListener('submit', onSetupSubmit);
+    document.getElementById('setupUser').focus();
+  } else {
+    overlay.innerHTML = `
+      <div class="auth-card">
+        <h2>⚡ Radar Cripto Sinais</h2>
+        <p class="hint">Acesso restrito. Entre com seu usuário e senha.</p>
+        <form id="loginForm">
+          <div class="auth-field"><label>Usuário</label><input type="text" id="loginUser" autocomplete="username" required></div>
+          <div class="auth-field"><label>Senha</label><input type="password" id="loginPass" autocomplete="current-password" required></div>
+          <button type="submit" class="auth-btn">Entrar</button>
+          <p class="auth-error" id="authErr">${errorMsg||''}</p>
+        </form>
+      </div>`;
+    document.getElementById('loginForm').addEventListener('submit', onLoginSubmit);
+    document.getElementById('loginUser').focus();
+  }
+}
+
+async function onSetupSubmit(e){
+  e.preventDefault();
+  const username = sanitizeUsername(document.getElementById('setupUser').value);
+  const pass = document.getElementById('setupPass').value;
+  const pass2 = document.getElementById('setupPass2').value;
+  if(pass!==pass2){ renderAuthOverlay('setup','As senhas não coincidem.'); return; }
+  if(!username){ renderAuthOverlay('setup','Digite um usuário válido.'); return; }
+  try{
+    const cred = await auth.createUserWithEmailAndPassword(toEmail(username), pass);
+    await db.collection('users').doc(cred.user.uid).set({
+      username, label:username, role:'master', revoked:false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await db.collection('config').doc('meta').set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    // onAuthStateChanged cuida da transição pra tela principal
+  }catch(err){
+    renderAuthOverlay('setup', authErrorMessage(err));
+  }
+}
+
+async function onLoginSubmit(e){
+  e.preventDefault();
+  const username = document.getElementById('loginUser').value;
+  const pass = document.getElementById('loginPass').value;
+  try{
+    await auth.signInWithEmailAndPassword(toEmail(username), pass);
+    // onAuthStateChanged cuida da transição pra tela principal
+  }catch(err){
+    renderAuthOverlay('login', authErrorMessage(err));
+  }
+}
+
+// Mensagens que precisam sobreviver a um signOut()/reload (guardadas no sessionStorage,
+// não numa variável em memória, porque logout() recarrega a página inteira).
+function setPendingAuthMessage(msg){ sessionStorage.setItem('scalpRadar_authMsg', msg); }
+function popPendingAuthMessage(){
+  const m = sessionStorage.getItem('scalpRadar_authMsg');
+  if(m) sessionStorage.removeItem('scalpRadar_authMsg');
+  return m;
+}
+
+async function onAuthenticated(user, retriesLeft){
+  if(retriesLeft===undefined) retriesLeft = 3;
+  const doc = await db.collection('users').doc(user.uid).get();
+  if(!doc.exists){
+    // pode ser uma corrida com a escrita do doc logo após o cadastro — tenta de novo antes de desistir
+    if(retriesLeft>0){ setTimeout(()=>onAuthenticated(user, retriesLeft-1), 400); return; }
+    setPendingAuthMessage('Conta não encontrada. Fale com o master.');
+    await auth.signOut(); // dispara onAuthStateChanged(null), que exibe a mensagem acima
+    return;
+  }
+  const data = doc.data();
+  if(data.revoked){
+    setPendingAuthMessage('Seu acesso foi revogado pelo master.');
+    await auth.signOut();
+    return;
+  }
+
+  currentUserData = data;
+
+  document.getElementById('authOverlay').style.display='none';
+  document.getElementById('userChip').style.display='flex';
+  document.getElementById('userLabel').textContent = data.label || data.username;
+  const badge = document.getElementById('userRoleBadge');
+  badge.textContent = data.role==='master' ? 'MASTER' : 'USUÁRIO';
+  badge.className = 'role-badge '+(data.role==='master'?'master':'guest');
+  // usuários cadastrados têm acesso completo aos filtros/controles; só a gestão de usuários é exclusiva do master
+  document.getElementById('usersBtn').style.display = data.role==='master' ? 'inline-block' : 'none';
+
+  // revogação em tempo real: se o master revogar enquanto o app está aberto, derruba o acesso na hora
+  if(revokeUnsub) revokeUnsub();
+  revokeUnsub = db.collection('users').doc(user.uid).onSnapshot(snap=>{
+    if(snap.exists && snap.data().revoked){
+      setPendingAuthMessage('Seu acesso foi revogado pelo master.');
+      logout();
+    }
+  });
+
+  init(); // varredura de mercado só começa após o login
+}
+
+function logout(){
+  if(revokeUnsub){ revokeUnsub(); revokeUnsub=null; }
+  auth.signOut().then(()=>location.reload());
+}
+
+function renderGuestList(){
+  db.collection('users').where('role','==','guest').get().then(snap=>{
+    const box = document.getElementById('guestList');
+    if(snap.empty){ box.innerHTML = '<div class="empty-guests">Nenhum usuário criado ainda.</div>'; return; }
+    const rows = [];
+    snap.forEach(doc=>{
+      const u = doc.data();
+      const created = u.createdAt && u.createdAt.toDate ? u.createdAt.toDate().toLocaleDateString('pt-BR') : '';
+      rows.push(`
+        <div class="guest-list-item">
+          <div>
+            <div class="glabel">${escapeHtml(u.label||u.username)}</div>
+            <div class="gmeta">criado em ${created} · usuário: ${escapeHtml(u.username)}</div>
+          </div>
+          <div class="gactions">
+            <span class="status-pill ${u.revoked?'revoked':'active'}">${u.revoked?'Revogado':'Ativo'}</span>
+            <button data-id="${doc.id}" data-revoked="${!!u.revoked}" class="toggleRevokeBtn">${u.revoked?'Reativar':'Revogar'}</button>
+          </div>
+        </div>`);
+    });
+    box.innerHTML = rows.join('');
+    box.querySelectorAll('.toggleRevokeBtn').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const newRevoked = btn.dataset.revoked !== 'true';
+        await db.collection('users').doc(btn.dataset.id).update({revoked:newRevoked});
+        renderGuestList();
+      });
+    });
+  });
+}
+
+async function onCreateGuest(){
+  const labelInput = document.getElementById('newGuestLabel');
+  const label = labelInput.value.trim() || 'Usuário';
+  const username = sanitizeUsername(label).slice(0,14) + '-' + randomSuffix(4);
+  const password = randomPassword(10);
+  const masterUid = auth.currentUser.uid;
+
+  // cria a conta em uma instância secundária do Firebase, pra não deslogar o master no processo
+  const secondaryApp = firebase.initializeApp(firebaseConfig, 'secondary-'+Date.now());
+  try{
+    const cred = await secondaryApp.auth().createUserWithEmailAndPassword(toEmail(username), password);
+    await db.collection('users').doc(cred.user.uid).set({
+      username, label, role:'guest', revoked:false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      createdBy: masterUid
+    });
+    await secondaryApp.auth().signOut();
+  }catch(err){
+    showToast(authErrorMessage(err));
+    await secondaryApp.delete();
+    return;
+  }
+  await secondaryApp.delete();
+
+  labelInput.value='';
+  const reveal = document.getElementById('revealBox');
+  reveal.innerHTML = `
+    <div class="reveal-box">
+      <div class="row"><span>Usuário</span><code>${escapeHtml(username)}</code></div>
+      <div class="row"><span>Senha</span><code>${escapeHtml(password)}</code></div>
+      <div class="warn">⚠️ Guarde agora — a senha não aparece de novo. Passe usuário e senha à pessoa: ela já entra de qualquer dispositivo, sem precisar de link.</div>
+    </div>`;
+  renderGuestList();
+}
+
+function openUsersModal(){
+  document.getElementById('usersModal').style.display='flex';
+  document.getElementById('revealBox').innerHTML='';
+  renderGuestList();
+}
+function closeUsersModal(){ document.getElementById('usersModal').style.display='none'; }
+
+function openPwdModal(){
+  document.getElementById('pwdForm').reset();
+  document.getElementById('pwdErr').textContent='';
+  document.getElementById('pwdModal').style.display='flex';
+}
+function closePwdModal(){ document.getElementById('pwdModal').style.display='none'; }
+
+async function onChangePassword(e){
+  e.preventDefault();
+  const current = document.getElementById('pwdCurrent').value;
+  const next = document.getElementById('pwdNew').value;
+  const next2 = document.getElementById('pwdNew2').value;
+  const errEl = document.getElementById('pwdErr');
+  if(next!==next2){ errEl.textContent='As novas senhas não coincidem.'; return; }
+  try{
+    const email = toEmail(currentUserData.username);
+    const credential = firebase.auth.EmailAuthProvider.credential(email, current);
+    await auth.currentUser.reauthenticateWithCredential(credential);
+    await auth.currentUser.updatePassword(next);
+    closePwdModal();
+    showToast('Senha atualizada com sucesso!');
+  }catch(err){
+    if(err.code==='auth/wrong-password' || err.code==='auth/invalid-credential'){
+      errEl.textContent = 'Senha atual incorreta.';
+    } else {
+      errEl.textContent = authErrorMessage(err);
+    }
+  }
+}
+
+function authBootstrap(){
+  auth.onAuthStateChanged(async user=>{
+    if(user){
+      onAuthenticated(user);
+    } else {
+      const pending = popPendingAuthMessage();
+      if(pending){ renderAuthOverlay('login', pending); return; }
+      const meta = await db.collection('config').doc('meta').get();
+      renderAuthOverlay(meta.exists ? 'login' : 'setup');
+    }
+  });
+}
+
+document.getElementById('usersBtn').addEventListener('click', openUsersModal);
+document.getElementById('closeUsersModal').addEventListener('click', closeUsersModal);
+document.getElementById('usersModal').addEventListener('click', (e)=>{ if(e.target.id==='usersModal') closeUsersModal(); });
+document.getElementById('createGuestBtn').addEventListener('click', onCreateGuest);
+document.getElementById('logoutBtn').addEventListener('click', logout);
+document.getElementById('changePasswordBtn').addEventListener('click', openPwdModal);
+document.getElementById('closePwdModal').addEventListener('click', closePwdModal);
+document.getElementById('pwdModal').addEventListener('click', (e)=>{ if(e.target.id==='pwdModal') closePwdModal(); });
+document.getElementById('pwdForm').addEventListener('submit', onChangePassword);
+
+/* ========================= CONFIG ========================= */
+const REST = "https://fapi.binance.com";
+const WS_BASE = "wss://fstream.binance.com/stream?streams=";
+let INTERVAL = "15m";
+const SEED_LIMIT = 200;
+const TOP_N = 32;
+const MIN_QUOTE_VOL = 40_000_000; // liquidez mínima 24h em USDT p/ segurança no scalp (evita micro-caps ilíquidas)
+const LIQUID_POOL = 60; // dentre os N mais líquidos, rankeia por volatilidade ("octanagem")
+const EXCLUDE = /^(USDC|BUSD|FDUSD|TUSD|USDP|DAI|EUR|USTC)USDT$/;
+const HTF_MAP = {"15m":"4h", "4h":"1d"}; // timeframe maior usado como filtro de confirmação
+const FUNDING_HOT = 0.02; // % — acima disso, funding é considerado "mercado lotado" naquela direção
+const CONFIRM_REFRESH_MS = 5*60*1000; // frequência de atualização de HTF/funding (dados que mudam devagar)
+// principais criptomoedas (referência de mercado), usadas para garantir metade da lista com nomes conhecidos
+const CORE_MAJORS = [
+  "BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","ADAUSDT","TRXUSDT",
+  "AVAXUSDT","LINKUSDT","DOTUSDT","LTCUSDT","BCHUSDT","NEARUSDT","ATOMUSDT","XLMUSDT",
+  "ETCUSDT","FILUSDT","UNIUSDT","AAVEUSDT","APTUSDT","ARBUSDT","OPUSDT","SUIUSDT",
+  "INJUSDT","ICPUSDT","HBARUSDT","RUNEUSDT","TAOUSDT","WLDUSDT","FETUSDT","TONUSDT",
+  "1000SHIBUSDT","1000PEPEUSDT","TIAUSDT","SEIUSDT","RENDERUSDT","GRTUSDT","ALGOUSDT","LDOUSDT"
+];
+
+let confMin = 70;
+let soundOn = false;
+let sortMode = "conf";
+const state = new Map(); // symbol -> data
+let ws = null;
+let reconnectAttempts = 0;
+
+/* ========================= MATH / INDICATORS ========================= */
+function ema(values, period){
+  const k = 2/(period+1);
+  const out = new Array(values.length).fill(null);
+  let prev = null;
+  for(let i=0;i<values.length;i++){
+    if(values[i]==null){continue;}
+    if(prev==null){
+      // seed with SMA of first `period`
+      if(i>=period-1){
+        let sum=0; for(let j=i-period+1;j<=i;j++) sum+=values[j];
+        prev = sum/period;
+        out[i]=prev;
+      }
+    } else {
+      prev = values[i]*k + prev*(1-k);
+      out[i]=prev;
+    }
+  }
+  return out;
+}
+function sma(values, period){
+  const out = new Array(values.length).fill(null);
+  for(let i=period-1;i<values.length;i++){
+    let sum=0; for(let j=i-period+1;j<=i;j++) sum+=values[j];
+    out[i]=sum/period;
+  }
+  return out;
+}
+function stddev(values, period, meanArr){
+  const out = new Array(values.length).fill(null);
+  for(let i=period-1;i<values.length;i++){
+    let m = meanArr[i]; if(m==null) continue;
+    let sum=0; for(let j=i-period+1;j<=i;j++) sum += (values[j]-m)*(values[j]-m);
+    out[i]=Math.sqrt(sum/period);
+  }
+  return out;
+}
+function rsi(closes, period){
+  const out = new Array(closes.length).fill(null);
+  let gainSum=0, lossSum=0;
+  for(let i=1;i<closes.length;i++){
+    const diff = closes[i]-closes[i-1];
+    const gain = diff>0?diff:0, loss = diff<0?-diff:0;
+    if(i<=period){
+      gainSum+=gain; lossSum+=loss;
+      if(i===period){
+        let avgG=gainSum/period, avgL=lossSum/period;
+        out[i]= avgL===0?100:100-(100/(1+avgG/avgL));
+        out._avgG=avgG; out._avgL=avgL;
+      }
+    } else {
+      out._avgG = (out._avgG*(period-1)+gain)/period;
+      out._avgL = (out._avgL*(period-1)+loss)/period;
+      out[i] = out._avgL===0?100:100-(100/(1+out._avgG/out._avgL));
+    }
+  }
+  return out;
+}
+function macdCalc(closes, fast=12, slow=26, signal=9){
+  const emaFast = ema(closes, fast);
+  const emaSlow = ema(closes, slow);
+  const macdLine = closes.map((_,i)=> (emaFast[i]!=null && emaSlow[i]!=null) ? emaFast[i]-emaSlow[i] : null);
+  const signalLine = ema(macdLine.map(v=>v==null?null:v), signal);
+  const hist = closes.map((_,i)=> (macdLine[i]!=null && signalLine[i]!=null) ? macdLine[i]-signalLine[i] : null);
+  return {macdLine, signalLine, hist};
+}
+function bollinger(closes, period=20, mult=2){
+  const mid = sma(closes, period);
+  const sd = stddev(closes, period, mid);
+  const upper = closes.map((_,i)=> mid[i]!=null? mid[i]+mult*sd[i] : null);
+  const lower = closes.map((_,i)=> mid[i]!=null? mid[i]-mult*sd[i] : null);
+  return {mid, upper, lower};
+}
+function atr(highs, lows, closes, period=14){
+  const tr = new Array(closes.length).fill(null);
+  for(let i=1;i<closes.length;i++){
+    tr[i]=Math.max(highs[i]-lows[i], Math.abs(highs[i]-closes[i-1]), Math.abs(lows[i]-closes[i-1]));
+  }
+  const out = new Array(closes.length).fill(null);
+  let prev=null;
+  for(let i=1;i<closes.length;i++){
+    if(prev==null){
+      if(i>=period){
+        let sum=0; for(let j=i-period+1;j<=i;j++) sum+=tr[j];
+        prev = sum/period; out[i]=prev;
+      }
+    } else {
+      prev = (prev*(period-1)+tr[i])/period;
+      out[i]=prev;
+    }
+  }
+  return out;
+}
+function adxCalc(highs, lows, closes, period=14){
+  const len = closes.length;
+  const plusDM = new Array(len).fill(0), minusDM = new Array(len).fill(0), tr = new Array(len).fill(0);
+  for(let i=1;i<len;i++){
+    const upMove = highs[i]-highs[i-1];
+    const downMove = lows[i-1]-lows[i];
+    plusDM[i] = (upMove>downMove && upMove>0) ? upMove : 0;
+    minusDM[i] = (downMove>upMove && downMove>0) ? downMove : 0;
+    tr[i] = Math.max(highs[i]-lows[i], Math.abs(highs[i]-closes[i-1]), Math.abs(lows[i]-closes[i-1]));
+  }
+  function wilderSmooth(arr){
+    const out = new Array(len).fill(null);
+    let prev=null;
+    for(let i=1;i<len;i++){
+      if(prev==null){
+        if(i>=period){ let s=0; for(let j=i-period+1;j<=i;j++) s+=arr[j]; prev=s; out[i]=prev; }
+      } else {
+        prev = prev - (prev/period) + arr[i];
+        out[i]=prev;
+      }
+    }
+    return out;
+  }
+  const trS = wilderSmooth(tr), plusS = wilderSmooth(plusDM), minusS = wilderSmooth(minusDM);
+  const plusDI = closes.map((_,i)=> (trS[i]?(plusS[i]/trS[i])*100:null));
+  const minusDI = closes.map((_,i)=> (trS[i]?(minusS[i]/trS[i])*100:null));
+  const dx = closes.map((_,i)=>{
+    if(plusDI[i]==null||minusDI[i]==null) return null;
+    const sum = plusDI[i]+minusDI[i];
+    return sum===0?0:(Math.abs(plusDI[i]-minusDI[i])/sum)*100;
+  });
+  const adx = ema(dx, period); // approximation of Wilder ADX smoothing
+  return {plusDI, minusDI, adx};
+}
+
+// VWAP ancorado no dia UTC: reinicia o acumulado a cada virada de dia
+function vwapArray(candles){
+  const out = new Array(candles.length).fill(null);
+  let cumPV=0, cumVol=0, lastDay=null;
+  for(let i=0;i<candles.length;i++){
+    const day = Math.floor(candles[i].t/86400000);
+    if(day!==lastDay){ cumPV=0; cumVol=0; lastDay=day; }
+    const typical = (candles[i].h+candles[i].l+candles[i].c)/3;
+    cumPV += typical*candles[i].v;
+    cumVol += candles[i].v;
+    out[i] = cumVol>0 ? cumPV/cumVol : null;
+  }
+  return out;
+}
+
+// Tendência do timeframe maior (EMA9/21), usada só como filtro — não entra na votação
+function computeHtfTrend(htfCandles){
+  if(!htfCandles || htfCandles.length<22) return null;
+  const closes = htfCandles.map(cd=>cd.c);
+  const e9 = ema(closes,9), e21 = ema(closes,21);
+  const last = closes.length-1;
+  if(e9[last]==null || e21[last]==null) return null;
+  const price = closes[last];
+  if(e9[last]>e21[last] && price>e9[last]) return 'up';
+  if(e9[last]<e21[last] && price<e9[last]) return 'down';
+  return 'flat';
+}
+
+/* ========================= SIGNAL ENGINE ========================= */
+// Combina 5 indicadores: EMA9/21, RSI14, MACD, Bollinger(posição), ADX/DI
+// Exige no mínimo 3 votos alinhados + ADX>=20 (filtro de força de tendência)
+// Camada extra de confirmação (não entra na votação, para não diluir/correlacionar demais):
+//  - VWAP diário: bônus leve se o preço está do lado certo
+//  - Funding rate: penaliza se o mercado já está "lotado" na mesma direção do sinal
+//  - Tendência do timeframe maior: filtro obrigatório — sinal contra o HTF vira NEUTRO
+function computeSignal(d){
+  const c = d.closes, h = d.highs, l = d.lows, v = d.volumes;
+  const n = c.length;
+  if(n<60) return null;
+  const last = n-1;
+
+  const ema9 = ema(c,9), ema21 = ema(c,21);
+  const rsi14 = rsi(c,14);
+  const macd = macdCalc(c,12,26,9);
+  const bb = bollinger(c,20,2);
+  const adxData = adxCalc(h,l,c,14);
+  const atr14 = atr(h,l,c,14);
+  const volSma20 = sma(v,20);
+
+  const price = c[last];
+  if([ema9[last],ema21[last],rsi14[last],macd.hist[last],bb.mid[last],adxData.adx[last],atr14[last]].some(x=>x==null)) return null;
+
+  let longVotes=0, shortVotes=0;
+  const tags = [];
+
+  // 1) EMA9/21 cross + preço em relação à EMA9
+  if(ema9[last]>ema21[last] && price>ema9[last]){ longVotes++; tags.push({k:'EMA 9/21',v:'up'}); }
+  else if(ema9[last]<ema21[last] && price<ema9[last]){ shortVotes++; tags.push({k:'EMA 9/21',v:'down'}); }
+  else tags.push({k:'EMA 9/21',v:'flat'});
+
+  // 2) RSI14 cruzando 50 com direção
+  const rsiPrev = rsi14[last-1];
+  if(rsi14[last]>50 && rsi14[last]>rsiPrev && rsi14[last]<75){ longVotes++; tags.push({k:'RSI '+rsi14[last].toFixed(0),v:'up'}); }
+  else if(rsi14[last]<50 && rsi14[last]<rsiPrev && rsi14[last]>25){ shortVotes++; tags.push({k:'RSI '+rsi14[last].toFixed(0),v:'down'}); }
+  else tags.push({k:'RSI '+rsi14[last].toFixed(0),v:'flat'});
+
+  // 3) MACD histograma positivo/crescendo
+  const histPrev = macd.hist[last-1];
+  if(macd.hist[last]>0 && macd.hist[last]>histPrev){ longVotes++; tags.push({k:'MACD',v:'up'}); }
+  else if(macd.hist[last]<0 && macd.hist[last]<histPrev){ shortVotes++; tags.push({k:'MACD',v:'down'}); }
+  else tags.push({k:'MACD',v:'flat'});
+
+  // 4) Bollinger: posição do preço vs banda média (viés de tendência)
+  const pctB = (price-bb.lower[last])/(bb.upper[last]-bb.lower[last]);
+  if(price>bb.mid[last] && pctB<0.95){ longVotes++; tags.push({k:'BB %B '+(pctB*100).toFixed(0),v:'up'}); }
+  else if(price<bb.mid[last] && pctB>0.05){ shortVotes++; tags.push({k:'BB %B '+(pctB*100).toFixed(0),v:'down'}); }
+  else tags.push({k:'BB %B '+(pctB*100).toFixed(0),v:'flat'});
+
+  // 5) ADX/DI: força + direção da tendência
+  const adxVal = adxData.adx[last];
+  if(adxData.plusDI[last]>adxData.minusDI[last]){ longVotes++; tags.push({k:'ADX '+adxVal.toFixed(0),v:'up'}); }
+  else { shortVotes++; tags.push({k:'ADX '+adxVal.toFixed(0),v:'down'}); }
+
+  // bônus: volume acima da média confirma força do movimento
+  const volConfirm = v[last] > volSma20[last]*1.3;
+
+  const totalVotes = 5;
+  const dirVotes = Math.max(longVotes, shortVotes);
+  let direction = longVotes>shortVotes ? "LONG" : shortVotes>longVotes ? "SHORT" : "NEUTRO";
+
+  let confidence = (dirVotes/totalVotes)*100;
+  if(volConfirm) confidence = Math.min(95, confidence+8);
+  if(adxVal<20) confidence = Math.min(confidence, 55); // mercado sem tendência clara -> penaliza
+
+  const consistent = dirVotes>=3 && adxVal>=20 && direction!=="NEUTRO";
+  if(!consistent) direction = "NEUTRO";
+
+  // ---- confirmações extras (filtro/modificador, fora da votação original) ----
+  const vwapArr = vwapArray(d.candles);
+  const vwapVal = vwapArr[vwapArr.length-1];
+  let vwapBonus=false, fundingPenalized=false, htfBlocked=false;
+
+  if(direction!=="NEUTRO"){
+    // VWAP diário: bônus leve se o preço está do lado certo
+    if(vwapVal!=null){
+      if(direction==="LONG" && price>vwapVal){ confidence = Math.min(97, confidence+5); vwapBonus=true; }
+      else if(direction==="SHORT" && price<vwapVal){ confidence = Math.min(97, confidence+5); vwapBonus=true; }
+    }
+    // Funding rate: penaliza se o mercado já está "lotado" na mesma direção do sinal
+    if(d.fundingRate!=null){
+      if(direction==="LONG" && d.fundingRate>FUNDING_HOT){ confidence = Math.max(30, confidence-12); fundingPenalized=true; }
+      else if(direction==="SHORT" && d.fundingRate<-FUNDING_HOT){ confidence = Math.max(30, confidence-12); fundingPenalized=true; }
+    }
+    // Tendência do timeframe maior: sinal contra o HTF é descartado (vira NEUTRO)
+    if(d.htfTrend){
+      if(direction==="LONG" && d.htfTrend==="down"){ direction="NEUTRO"; htfBlocked=true; }
+      else if(direction==="SHORT" && d.htfTrend==="up"){ direction="NEUTRO"; htfBlocked=true; }
+    }
+  }
+
+  // trade levels
+  const atrVal = atr14[last];
+  let entry=price, stop=null, tp1=null, tp2=null;
+  if(direction==="LONG"){
+    stop = price - atrVal*1.3;
+    tp1 = price + atrVal*1.5;
+    tp2 = price + atrVal*2.6;
+  } else if(direction==="SHORT"){
+    stop = price + atrVal*1.3;
+    tp1 = price - atrVal*1.5;
+    tp2 = price - atrVal*2.6;
+  }
+
+  return {
+    direction, confidence: Math.round(confidence), tags, price,
+    entry, stop, tp1, tp2, adx: adxVal, rsi: rsi14[last], volConfirm,
+    atr: atrVal,
+    vwap: vwapVal, vwapBonus,
+    fundingRate: d.fundingRate, fundingPenalized,
+    htfTrend: d.htfTrend, htfBlocked
+  };
+}
+
+/* ========================= DATA / SELECTION ========================= */
+async function selectTop16(){
+  const [exInfo, tickers] = await Promise.all([
+    fetch(REST+"/fapi/v1/exchangeInfo").then(r=>r.json()),
+    fetch(REST+"/fapi/v1/ticker/24hr").then(r=>r.json())
+  ]);
+  const perpSet = new Set(
+    exInfo.symbols.filter(s=>s.contractType==="PERPETUAL" && s.status==="TRADING" && s.quoteAsset==="USDT")
+      .map(s=>s.symbol)
+  );
+  const byId = new Map(tickers.map(t=>[t.symbol, t]));
+  let candidates = tickers.filter(t=>
+    perpSet.has(t.symbol) &&
+    t.symbol.endsWith("USDT") &&
+    !EXCLUDE.test(t.symbol) &&
+    parseFloat(t.quoteVolume) >= MIN_QUOTE_VOL
+  );
+  candidates.forEach(t=>{
+    t._octane = (parseFloat(t.highPrice)-parseFloat(t.lowPrice))/parseFloat(t.lowPrice)*100; // amplitude 24h
+  });
+
+  // 1) metade da lista: principais criptomoedas (referência de mercado), na ordem de relevância, que estejam líquidas
+  const coreSlots = Math.ceil(TOP_N/2);
+  const core = [];
+  const usedSymbols = new Set();
+  for(const sym of CORE_MAJORS){
+    if(core.length>=coreSlots) break;
+    if(perpSet.has(sym) && byId.has(sym) && parseFloat(byId.get(sym).quoteVolume)>=MIN_QUOTE_VOL){
+      core.push(byId.get(sym));
+      usedSymbols.add(sym);
+    }
+  }
+
+  // 2) metade restante: maior "octanagem" (volatilidade 24h) dentre o pool mais líquido, excluindo os já escolhidos
+  let rest = candidates.filter(t=>!usedSymbols.has(t.symbol));
+  rest.sort((a,b)=>parseFloat(b.quoteVolume)-parseFloat(a.quoteVolume));
+  rest = rest.slice(0, LIQUID_POOL);
+  rest.sort((a,b)=>b._octane-a._octane);
+  const octanePicks = rest.slice(0, TOP_N-core.length);
+
+  const final = [...core, ...octanePicks];
+  return final.map(t=>({
+    symbol:t.symbol, priceChangePercent:parseFloat(t.priceChangePercent),
+    quoteVolume:parseFloat(t.quoteVolume), lastPrice:parseFloat(t.lastPrice), octane:t._octane
+  }));
+}
+
+async function seedKlines(symbol){
+  const url = `${REST}/fapi/v1/klines?symbol=${symbol}&interval=${INTERVAL}&limit=${SEED_LIMIT}`;
+  const raw = await fetch(url).then(r=>r.json());
+  return raw.map(k=>({
+    t:k[0], o:parseFloat(k[1]), h:parseFloat(k[2]), l:parseFloat(k[3]), c:parseFloat(k[4]), v:parseFloat(k[5]), closed:true
+  }));
+}
+
+async function seedHtf(symbol, htfInterval){
+  const url = `${REST}/fapi/v1/klines?symbol=${symbol}&interval=${htfInterval}&limit=30`;
+  const raw = await fetch(url).then(r=>r.json());
+  return raw.map(k=>({ t:k[0], h:parseFloat(k[2]), l:parseFloat(k[3]), c:parseFloat(k[4]) }));
+}
+
+async function fetchFundingRate(symbol){
+  try{
+    const data = await fetch(`${REST}/fapi/v1/premiumIndex?symbol=${symbol}`).then(r=>r.json());
+    return parseFloat(data.lastFundingRate)*100; // em %
+  }catch(e){ return null; }
+}
+
+let confirmRefreshTimer = null;
+async function refreshConfirmations(){
+  const htfInterval = HTF_MAP[INTERVAL];
+  const symbols = Array.from(state.keys());
+  const chunks = [];
+  for(let i=0;i<symbols.length;i+=4) chunks.push(symbols.slice(i,i+4));
+  for(const chunk of chunks){
+    await Promise.all(chunk.map(async sym=>{
+      const d = state.get(sym);
+      if(!d) return;
+      try{
+        const [htfCandles, fundingRate] = await Promise.all([seedHtf(sym, htfInterval), fetchFundingRate(sym)]);
+        d.htfTrend = computeHtfTrend(htfCandles);
+        d.fundingRate = fundingRate;
+      }catch(e){ /* mantém valores anteriores em caso de falha pontual */ }
+      if(d.closes && d.closes.length){
+        d.signal = computeSignal(d);
+        renderCard(sym);
+      }
+    }));
+  }
+}
+function scheduleConfirmRefresh(){
+  if(confirmRefreshTimer) clearInterval(confirmRefreshTimer);
+  confirmRefreshTimer = setInterval(refreshConfirmations, CONFIRM_REFRESH_MS);
+}
+
+/* ========================= WEBSOCKET ========================= */
+function connectWS(symbols){
+  if(ws){ try{ ws.onclose=null; ws.onerror=null; ws.close(); }catch(e){} }
+  const streams = symbols.map(s=>s.toLowerCase()+"@kline_"+INTERVAL).join("/");
+  const socket = new WebSocket(WS_BASE+streams);
+  ws = socket;
+  socket.onopen = ()=>{
+    if(ws!==socket) return;
+    reconnectAttempts=0;
+    document.getElementById('wsDot').classList.add('on');
+    document.getElementById('wsStatus').textContent = 'conectado (ao vivo)';
+  };
+  socket.onclose = ()=>{
+    if(ws!==socket) return; // socket antigo, substituído por uma troca intencional (ex: timeframe)
+    document.getElementById('wsDot').classList.remove('on');
+    document.getElementById('wsStatus').textContent = 'reconectando…';
+    const delay = Math.min(15000, 1000*Math.pow(1.6, reconnectAttempts++));
+    setTimeout(()=>connectWS(symbols), delay);
+  };
+  socket.onerror = ()=>{ try{socket.close();}catch(e){} };
+  socket.onmessage = (msg)=>{
+    if(ws!==socket) return;
+    let payload;
+    try{ payload = JSON.parse(msg.data); }catch(e){ return; }
+    const data = payload.data;
+    if(!data || data.e!=="kline" || data.k.i!==INTERVAL) return;
+    handleKline(data.s, data.k);
+  };
+}
+
+function handleKline(symbol, k){
+  const d = state.get(symbol);
+  if(!d) return;
+  const candle = { t:k.t, o:parseFloat(k.o), h:parseFloat(k.h), l:parseFloat(k.l), c:parseFloat(k.c), v:parseFloat(k.v), closed:k.x };
+  const arr = d.candles;
+  const lastIdx = arr.length-1;
+  if(arr[lastIdx] && arr[lastIdx].t===candle.t){
+    arr[lastIdx]=candle;
+  } else if(arr[lastIdx] && candle.t>arr[lastIdx].t){
+    arr.push(candle);
+    if(arr.length>SEED_LIMIT) arr.shift();
+  } else {
+    return;
+  }
+  d.prevPrice = d.lastPrice;
+  d.lastPrice = candle.c;
+  d.lastUpdate = Date.now();
+
+  // acompanha stop/alvos dos trades em aberto a cada vela FECHADA (usa máx/mín da vela).
+  // Só no fechamento porque a vela em formação manda máx/mín acumulados da vela inteira —
+  // checar a cada tick faria o sistema "lembrar" de um mínimo antigo (de antes de bater o
+  // alvo 1, por ex.) e fechar o trade errado. É uma aproximação: dentro de uma mesma vela
+  // fechada ainda não dá pra saber se o máximo ou o mínimo aconteceu primeiro.
+  if(candle.closed) checkOpenTrades(symbol, candle.h, candle.l);
+
+  // recompute indicators: full recompute on close, lightweight throttle otherwise
+  const now = Date.now();
+  if(candle.closed || !d._lastCalc || now-d._lastCalc>2000){
+    d._lastCalc = now;
+    d.closes = arr.map(x=>x.c); d.highs = arr.map(x=>x.h); d.lows = arr.map(x=>x.l); d.volumes = arr.map(x=>x.v);
+    const sig = computeSignal(d);
+    if(sig){
+      const prevDir = d.signal ? d.signal.direction : "NEUTRO";
+      d.signal = sig;
+      if(candle.closed && sig.direction!=="NEUTRO" && sig.confidence>=confMin && sig.direction!==prevDir){
+        pushLog(symbol, sig);
+        openTrade(symbol, sig);
+      }
+    }
+  }
+  renderCard(symbol);
+}
+
+/* ========================= DIÁRIO DE TRADES ========================= */
+// Registra cada sinal disparado e acompanha o preço em tempo real pra ver se bateu
+// stop ou alvo. Fica salvo no localStorage (só neste navegador, não sincroniza entre
+// dispositivos). Ao bater o Alvo 1, o stop "sobe" pro preço de entrada (empate), prática
+// comum de scalp — evita contar como perda cheia um trade que já tinha ido a favor.
+const TRADE_LOG_KEY = "scalpRadar_tradeLog";
+const TRADE_LOG_MAX = 300;
+let tradeLog = [];
+
+function loadTradeLog(){
+  try{ tradeLog = JSON.parse(localStorage.getItem(TRADE_LOG_KEY)) || []; }catch(e){ tradeLog = []; }
+}
+function saveTradeLog(){
+  localStorage.setItem(TRADE_LOG_KEY, JSON.stringify(tradeLog.slice(0, TRADE_LOG_MAX)));
+}
+
+function openTrade(symbol, sig){
+  tradeLog.unshift({
+    id: Date.now()+'-'+symbol,
+    symbol, direction: sig.direction, entry: sig.entry, stop: sig.stop, tp1: sig.tp1, tp2: sig.tp2,
+    confidence: sig.confidence, timeframe: INTERVAL,
+    openedAt: Date.now(), status: 'aberto', closedAt: null, exitPrice: null, pnlPct: null
+  });
+  if(tradeLog.length>TRADE_LOG_MAX) tradeLog.length = TRADE_LOG_MAX;
+  saveTradeLog();
+  renderTradeLog();
+}
+
+function closeTradeAt(t, status, exitPrice){
+  t.status = status;
+  t.closedAt = Date.now();
+  t.exitPrice = exitPrice;
+  const sign = t.direction==='LONG' ? 1 : -1;
+  t.pnlPct = ((exitPrice - t.entry)/t.entry) * 100 * sign;
+}
+
+function checkOpenTrades(symbol, high, low){
+  let changed = false;
+  tradeLog.forEach(t=>{
+    if(t.symbol!==symbol || t.status==='tp2' || t.status==='stop' || t.status==='stop_be') return;
+    if(t.direction==='LONG'){
+      if(t.status==='aberto'){
+        if(low<=t.stop){ closeTradeAt(t,'stop', t.stop); changed=true; return; }
+        // ao bater o alvo 1, só passa a avaliar alvo 2/empate a partir da PRÓXIMA vela —
+        // evita usar o mínimo desta mesma vela (que pode ter ocorrido antes do alvo 1 ser batido)
+        if(high>=t.tp1){ t.status='tp1'; changed=true; return; }
+      }
+      if(t.status==='tp1'){
+        if(high>=t.tp2){ closeTradeAt(t,'tp2', t.tp2); changed=true; }
+        else if(low<=t.entry){ closeTradeAt(t,'stop_be', t.entry); changed=true; }
+      }
+    } else {
+      if(t.status==='aberto'){
+        if(high>=t.stop){ closeTradeAt(t,'stop', t.stop); changed=true; return; }
+        if(low<=t.tp1){ t.status='tp1'; changed=true; return; }
+      }
+      if(t.status==='tp1'){
+        if(low<=t.tp2){ closeTradeAt(t,'tp2', t.tp2); changed=true; }
+        else if(high>=t.entry){ closeTradeAt(t,'stop_be', t.entry); changed=true; }
+      }
+    }
+  });
+  if(changed){ saveTradeLog(); renderTradeLog(); }
+}
+
+const STATUS_LABEL = {
+  aberto: 'Aberto', tp1: 'Alvo 1 (seguindo)', tp2: 'Alvo 2 ✓', stop: 'Stop ✗', stop_be: 'Empate (BE)'
+};
+const STATUS_CLASS = {
+  aberto: '', tp1: 'up', tp2: 'up', stop: 'down', stop_be: ''
+};
+
+function renderTradeLog(){
+  const summaryEl = document.getElementById('tradeSummary');
+  const bodyEl = document.getElementById('tradeTableBody');
+  if(!summaryEl || !bodyEl) return;
+
+  const closed = tradeLog.filter(t=>t.status==='tp2'||t.status==='stop'||t.status==='stop_be');
+  const wins = closed.filter(t=>t.status==='tp2').length;
+  const losses = closed.filter(t=>t.status==='stop').length;
+  const be = closed.filter(t=>t.status==='stop_be').length;
+  const winRate = (wins+losses)>0 ? (wins/(wins+losses)*100) : null;
+  const avgPnl = closed.length>0 ? closed.reduce((s,t)=>s+t.pnlPct,0)/closed.length : null;
+
+  summaryEl.innerHTML = `
+    <div class="ts-item"><span class="ts-num">${tradeLog.length}</span><span class="ts-lbl">sinais registrados</span></div>
+    <div class="ts-item"><span class="ts-num">${closed.length}</span><span class="ts-lbl">fechados</span></div>
+    <div class="ts-item"><span class="ts-num ${winRate==null?'':(winRate>=50?'up':'down')}">${winRate==null?'--':winRate.toFixed(0)+'%'}</span><span class="ts-lbl">taxa de acerto (${wins}✓ / ${losses}✗ / ${be} BE)</span></div>
+    <div class="ts-item"><span class="ts-num ${avgPnl==null?'':(avgPnl>=0?'up':'down')}">${avgPnl==null?'--':(avgPnl>=0?'+':'')+avgPnl.toFixed(2)+'%'}</span><span class="ts-lbl">resultado médio por trade</span></div>
+  `;
+
+  if(tradeLog.length===0){
+    bodyEl.innerHTML = `<tr><td colspan="7" class="empty-guests">Nenhum sinal registrado ainda — aparece aqui assim que o sistema disparar um sinal.</td></tr>`;
+    return;
+  }
+  bodyEl.innerHTML = tradeLog.map(t=>`
+    <tr>
+      <td>${t.symbol.replace('USDT','')}</td>
+      <td><span class="badge ${t.direction}">${t.direction}</span></td>
+      <td>${fmtPrice(t.entry)}</td>
+      <td>${t.confidence}%</td>
+      <td><span class="chip ${STATUS_CLASS[t.status]}">${STATUS_LABEL[t.status]}</span></td>
+      <td class="${t.pnlPct==null?'':(t.pnlPct>=0?'chg-pos':'chg-neg')}">${t.pnlPct==null?'--':(t.pnlPct>=0?'+':'')+t.pnlPct.toFixed(2)+'%'}</td>
+      <td>${new Date(t.openedAt).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+    </tr>
+  `).join('');
+}
+
+/* ========================= UI ========================= */
+function fmtPrice(p){
+  if(p>=1000) return p.toLocaleString('en-US',{maximumFractionDigits:2});
+  if(p>=1) return p.toLocaleString('en-US',{maximumFractionDigits:4});
+  if(p>=0.01) return p.toLocaleString('en-US',{maximumFractionDigits:6});
+  return p.toLocaleString('en-US',{maximumFractionDigits:8});
+}
+
+function sparklinePath(closes){
+  const n = closes.length; if(n<2) return "";
+  const w=100,h=34;
+  const min=Math.min(...closes), max=Math.max(...closes);
+  const range = (max-min)||1;
+  const step = w/(n-1);
+  let d="";
+  closes.forEach((c,i)=>{
+    const x=i*step, y=h-((c-min)/range)*h;
+    d += (i===0?"M":"L")+x.toFixed(2)+","+y.toFixed(2)+" ";
+  });
+  return d;
+}
+
+function buildCardSkeleton(symbol, meta){
+  const div = document.createElement('div');
+  div.className='card'; div.id='card-'+symbol;
+  div.innerHTML = `
+    <div class="card-top">
+      <div class="sym">${symbol.replace('USDT','')}<small>/USDT PERP</small></div>
+      <div class="price" id="price-${symbol}">--</div>
+    </div>
+    <div class="sub-row">
+      <span>24h: <b id="chg-${symbol}" class="${meta.priceChangePercent>=0?'chg-pos':'chg-neg'}">${meta.priceChangePercent.toFixed(2)}%</b></span>
+      <span id="vol-${symbol}">Vol: $${(meta.quoteVolume/1e6).toFixed(1)}M</span>
+    </div>
+    <svg class="spark" viewBox="0 0 100 34" preserveAspectRatio="none"><path id="spark-${symbol}" fill="none" stroke="#4f8ff7" stroke-width="1.4"/></svg>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span class="badge NEUTRO" id="badge-${symbol}">NEUTRO</span>
+      <span class="conf" id="conf-${symbol}">conf: <b>--</b></span>
+    </div>
+    <div class="ind-row" id="tags-${symbol}"></div>
+    <div class="ind-row" id="tagsExtra-${symbol}"></div>
+    <div class="trade-box" id="trade-${symbol}">
+      <div class="trade-row"><span class="lbl">Entrada</span><span id="tEntry-${symbol}">--</span></div>
+      <div class="trade-row"><span class="lbl">Stop</span><span id="tStop-${symbol}">--</span></div>
+      <div class="trade-row"><span class="lbl">Alvo 1</span><span id="tTp1-${symbol}">--</span></div>
+      <div class="trade-row"><span class="lbl">Alvo 2</span><span id="tTp2-${symbol}">--</span></div>
+      <div class="trade-row"><span class="lbl">R:R</span><span id="tRR-${symbol}">--</span></div>
+    </div>
+    <div class="footer-card"><span>ATR14: <span id="atr-${symbol}">--</span></span><span id="upd-${symbol}">--</span></div>
+  `;
+  return div;
+}
+
+function renderCard(symbol){
+  const d = state.get(symbol);
+  if(!d || !d.lastPrice) return;
+  const priceEl = document.getElementById('price-'+symbol);
+  if(priceEl){
+    priceEl.textContent = fmtPrice(d.lastPrice);
+    if(d.prevPrice!=null){
+      priceEl.classList.remove('up','down');
+      if(d.lastPrice>d.prevPrice) priceEl.classList.add('up');
+      else if(d.lastPrice<d.prevPrice) priceEl.classList.add('down');
+    }
+  }
+  const sparkEl = document.getElementById('spark-'+symbol);
+  if(sparkEl && d.closes) sparkEl.setAttribute('d', sparklinePath(d.closes.slice(-40)));
+
+  const card = document.getElementById('card-'+symbol);
+  const badge = document.getElementById('badge-'+symbol);
+  const conf = document.getElementById('conf-'+symbol);
+  const tagsBox = document.getElementById('tags-'+symbol);
+  const tagsExtraBox = document.getElementById('tagsExtra-'+symbol);
+  const tradeBox = document.getElementById('trade-'+symbol);
+  const atrEl = document.getElementById('atr-'+symbol);
+  const updEl = document.getElementById('upd-'+symbol);
+
+  if(d.signal){
+    const s = d.signal;
+    card.classList.remove('long','short');
+    badge.className = 'badge '+s.direction;
+    badge.textContent = s.direction;
+    conf.innerHTML = 'conf: <b>'+s.confidence+'%</b>';
+    tagsBox.innerHTML = s.tags.map(t=>`<span class="chip ${t.v==='flat'?'':t.v}">${t.k}</span>`).join('');
+    atrEl.textContent = fmtPrice(s.atr);
+
+    const extraChips = [];
+    if(s.htfTrend){
+      const arrow = s.htfTrend==='up'?'↑':s.htfTrend==='down'?'↓':'—';
+      const cls = s.htfBlocked ? 'down' : (s.htfTrend==='flat' ? '' : s.htfTrend);
+      extraChips.push(`<span class="chip ${cls}">HTF ${HTF_MAP[INTERVAL]} ${arrow}${s.htfBlocked?' (bloqueado)':''}</span>`);
+    }
+    if(s.fundingRate!=null){
+      extraChips.push(`<span class="chip ${s.fundingPenalized?'down':''}">Funding ${s.fundingRate.toFixed(3)}%${s.fundingPenalized?' ⚠':''}</span>`);
+    }
+    if(s.vwap!=null){
+      extraChips.push(`<span class="chip ${s.vwapBonus?'up':''}">VWAP ${s.vwapBonus?'✓':'—'}</span>`);
+    }
+    tagsExtraBox.innerHTML = extraChips.join('');
+
+    if(s.direction!=="NEUTRO" && s.confidence>=confMin){
+      card.classList.add(s.direction==="LONG"?'long':'short');
+      tradeBox.classList.add('show');
+      document.getElementById('tEntry-'+symbol).textContent = fmtPrice(s.entry);
+      document.getElementById('tStop-'+symbol).textContent = fmtPrice(s.stop);
+      document.getElementById('tTp1-'+symbol).textContent = fmtPrice(s.tp1);
+      document.getElementById('tTp2-'+symbol).textContent = fmtPrice(s.tp2);
+      const risk = Math.abs(s.entry-s.stop), reward = Math.abs(s.tp2-s.entry);
+      document.getElementById('tRR-'+symbol).textContent = '1 : '+(reward/risk).toFixed(2);
+    } else {
+      tradeBox.classList.remove('show');
+    }
+  }
+  if(updEl) updEl.textContent = 'atualizado ' + new Date(d.lastUpdate).toLocaleTimeString('pt-BR');
+}
+
+function pushLog(symbol, sig){
+  const log = document.getElementById('log');
+  const empty = log.querySelector('.log-empty');
+  if(empty) empty.remove();
+  const item = document.createElement('div');
+  item.className='log-item';
+  item.innerHTML = `
+    <span class="log-time">${new Date().toLocaleTimeString('pt-BR')}</span>
+    <span class="badge ${sig.direction}">${sig.direction}</span>
+    <b>${symbol.replace('USDT','')}</b>
+    <span style="color:var(--muted)">conf ${sig.confidence}% · entrada ${fmtPrice(sig.entry)} · stop ${fmtPrice(sig.stop)} · alvo ${fmtPrice(sig.tp2)}</span>
+  `;
+  log.prepend(item);
+  while(log.children.length>60) log.removeChild(log.lastChild);
+  if(soundOn) beep();
+}
+
+function beep(){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 880; g.gain.value = 0.08;
+    o.start(); setTimeout(()=>{o.stop(); ctx.close();}, 150);
+  }catch(e){}
+}
+
+function applySort(){
+  const grid = document.getElementById('grid');
+  const cards = Array.from(grid.children);
+  cards.sort((a,b)=>{
+    const sa = a.id.replace('card-',''), sb = b.id.replace('card-','');
+    const da = state.get(sa), db = state.get(sb);
+    if(sortMode==='conf'){
+      const ca = da.signal? (da.signal.direction!=='NEUTRO'?da.signal.confidence:-1) : -1;
+      const cb = db.signal? (db.signal.direction!=='NEUTRO'?db.signal.confidence:-1) : -1;
+      return cb-ca;
+    }
+    if(sortMode==='chg') return (db.meta.priceChangePercent)-(da.meta.priceChangePercent);
+    if(sortMode==='vol') return (db.meta.quoteVolume)-(da.meta.quoteVolume);
+    return sa.localeCompare(sb);
+  });
+  cards.forEach(c=>grid.appendChild(c));
+}
+
+/* ========================= TIMEFRAME SWITCH ========================= */
+async function changeTimeframe(newInterval){
+  if(newInterval===INTERVAL || state.size===0) return;
+  INTERVAL = newInterval;
+  document.getElementById('tfLabel').textContent = newInterval;
+  document.getElementById('wsDot').classList.remove('on');
+  document.getElementById('wsStatus').textContent = 'trocando para '+newInterval+'…';
+
+  const symbols = Array.from(state.keys());
+  const chunks = [];
+  for(let i=0;i<symbols.length;i+=4) chunks.push(symbols.slice(i,i+4));
+  for(const chunk of chunks){
+    await Promise.all(chunk.map(async sym=>{
+      try{
+        const candles = await seedKlines(sym);
+        const d = state.get(sym);
+        d.candles = candles;
+        d.closes = candles.map(c=>c.c); d.highs = candles.map(c=>c.h); d.lows = candles.map(c=>c.l); d.volumes = candles.map(c=>c.v);
+        d.lastPrice = candles[candles.length-1].c;
+        d.signal = computeSignal(d);
+        renderCard(sym);
+      }catch(e){ /* mantém dados anteriores se falhar */ }
+    }));
+  }
+  pushDivider('Timeframe alterado para '+newInterval);
+  connectWS(symbols);
+  applySort();
+  refreshConfirmations(); // HTF/funding usam mapeamento diferente por timeframe, precisa recarregar
+}
+
+function pushDivider(text){
+  const log = document.getElementById('log');
+  const empty = log.querySelector('.log-empty');
+  if(empty) empty.remove();
+  const item = document.createElement('div');
+  item.className='log-item';
+  item.innerHTML = `<span class="log-time">${new Date().toLocaleTimeString('pt-BR')}</span><span style="color:var(--blue)">⟳ ${text}</span>`;
+  log.prepend(item);
+}
+
+/* ========================= INIT ========================= */
+async function init(){
+  document.getElementById('loadingBox').style.display='block';
+  document.getElementById('content').style.display='none';
+  state.clear();
+  document.getElementById('grid').innerHTML='';
+  document.getElementById('log').innerHTML='<div class="log-empty">Aguardando sinais com confluência ≥ confiança mínima…</div>';
+  renderTradeLog(); // mostra o histórico já salvo, independente da varredura de mercado
+
+  let top16;
+  try{
+    top16 = await selectTop16();
+  }catch(e){
+    document.getElementById('loadingBox').innerHTML = '❌ Falha ao consultar a API pública da Binance. Verifique sua conexão e recarregue a página.';
+    return;
+  }
+
+  const grid = document.getElementById('grid');
+  for(const meta of top16){
+    state.set(meta.symbol, {meta, candles:[], closes:[],highs:[],lows:[],volumes:[], lastPrice:meta.lastPrice, signal:null, lastUpdate:Date.now()});
+    grid.appendChild(buildCardSkeleton(meta.symbol, meta));
+  }
+
+  // seed historical candles in parallel (limited concurrency to be gentle with rate limits)
+  const symbols = top16.map(t=>t.symbol);
+  const chunks = [];
+  for(let i=0;i<symbols.length;i+=4) chunks.push(symbols.slice(i,i+4));
+  for(const chunk of chunks){
+    await Promise.all(chunk.map(async sym=>{
+      try{
+        const candles = await seedKlines(sym);
+        const d = state.get(sym);
+        d.candles = candles;
+        d.closes = candles.map(c=>c.c); d.highs = candles.map(c=>c.h); d.lows = candles.map(c=>c.l); d.volumes = candles.map(c=>c.v);
+        d.lastPrice = candles[candles.length-1].c;
+        d.signal = computeSignal(d);
+        renderCard(sym);
+      }catch(e){ /* skip symbol on seed failure */ }
+    }));
+  }
+
+  document.getElementById('symCount').textContent = symbols.length;
+  document.getElementById('loadingBox').style.display='none';
+  document.getElementById('content').style.display='block';
+
+  connectWS(symbols);
+  applySort();
+  setInterval(applySort, 8000);
+  refreshConfirmations();
+  scheduleConfirmRefresh();
+}
+
+document.getElementById('confSlider').addEventListener('input', e=>{
+  confMin = parseInt(e.target.value);
+  document.getElementById('confVal').textContent = confMin+'%';
+  state.forEach((d,sym)=>renderCard(sym));
+});
+document.getElementById('soundToggle').addEventListener('change', e=> soundOn = e.target.checked);
+document.getElementById('tfSel').addEventListener('change', e=> changeTimeframe(e.target.value));
+document.getElementById('sortSel').addEventListener('change', e=>{ sortMode = e.target.value; applySort(); });
+document.getElementById('refreshBtn').addEventListener('click', ()=>{ init(); });
+
+loadTradeLog();
+authBootstrap();
+})();
+</script>
+</body>
+</html>

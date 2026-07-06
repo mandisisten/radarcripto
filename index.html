@@ -404,11 +404,13 @@ async function onAuthenticated(user, retriesLeft){
     }
   });
 
+  startTradeLogSync();
   init(); // varredura de mercado só começa após o login
 }
 
 function logout(){
   if(revokeUnsub){ revokeUnsub(); revokeUnsub=null; }
+  stopTradeLogSync();
   auth.signOut().then(()=>location.reload());
 }
 
@@ -999,7 +1001,7 @@ function handleKline(symbol, k){
       d.signal = sig;
       if(candle.closed && sig.direction!=="NEUTRO" && sig.confidence>=confMin && sig.direction!==prevDir){
         pushLog(symbol, sig);
-        openTrade(symbol, sig);
+        openTrade(symbol, sig, candle.t);
       }
     }
   }
@@ -1008,74 +1010,86 @@ function handleKline(symbol, k){
 
 /* ========================= DIÁRIO DE TRADES ========================= */
 // Registra cada sinal disparado e acompanha o preço em tempo real pra ver se bateu
-// stop ou alvo. Fica salvo no localStorage (só neste navegador, não sincroniza entre
-// dispositivos). Ao bater o Alvo 1, o stop "sobe" pro preço de entrada (empate), prática
-// comum de scalp — evita contar como perda cheia um trade que já tinha ido a favor.
-const TRADE_LOG_KEY = "scalpRadar_tradeLog";
-const TRADE_LOG_MAX = 300;
+// stop ou alvo. Fica salvo no Firestore (mesmo banco do login) — sincroniza entre
+// qualquer navegador/dispositivo/usuário logado, e sobrevive a fechar o navegador.
+// ID do documento é determinístico (símbolo+vela+direção), então se dois usuários
+// estiverem com o app aberto ao mesmo tempo, ambos escrevem no MESMO registro em
+// vez de duplicar. Ao bater o Alvo 1, esse ganho já fica travado — mesmo que o preço
+// depois recue até a entrada, conta como lucro (Alvo 1 parcial), nunca como empate.
+const TRADE_LOG_LIMIT = 500; // cobre bem mais que 12h de sinais
 let tradeLog = [];
+let tradeLogUnsub = null;
 
-function loadTradeLog(){
-  try{ tradeLog = JSON.parse(localStorage.getItem(TRADE_LOG_KEY)) || []; }catch(e){ tradeLog = []; }
+function startTradeLogSync(){
+  if(tradeLogUnsub) tradeLogUnsub();
+  tradeLogUnsub = db.collection('trades').orderBy('openedAt','desc').limit(TRADE_LOG_LIMIT)
+    .onSnapshot(snap=>{
+      tradeLog = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      renderTradeLog();
+    }, err=>{ /* fica com o último estado conhecido se a leitura falhar momentaneamente */ });
 }
-function saveTradeLog(){
-  localStorage.setItem(TRADE_LOG_KEY, JSON.stringify(tradeLog.slice(0, TRADE_LOG_MAX)));
-}
-
-function openTrade(symbol, sig){
-  tradeLog.unshift({
-    id: Date.now()+'-'+symbol,
-    symbol, direction: sig.direction, entry: sig.entry, stop: sig.stop, tp1: sig.tp1, tp2: sig.tp2,
-    confidence: sig.confidence, timeframe: INTERVAL,
-    openedAt: Date.now(), status: 'aberto', closedAt: null, exitPrice: null, pnlPct: null
-  });
-  if(tradeLog.length>TRADE_LOG_MAX) tradeLog.length = TRADE_LOG_MAX;
-  saveTradeLog();
-  renderTradeLog();
+function stopTradeLogSync(){
+  if(tradeLogUnsub){ tradeLogUnsub(); tradeLogUnsub=null; }
+  tradeLog = [];
 }
 
-function closeTradeAt(t, status, exitPrice){
-  t.status = status;
-  t.closedAt = Date.now();
-  t.exitPrice = exitPrice;
+function openTrade(symbol, sig, candleOpenTime){
+  const id = `${symbol}_${candleOpenTime}_${sig.direction}`;
+  const ref = db.collection('trades').doc(id);
+  ref.get().then(doc=>{
+    if(doc.exists) return; // já registrado (por este ou outro cliente conectado)
+    return ref.set({
+      symbol, direction: sig.direction, entry: sig.entry, stop: sig.stop, tp1: sig.tp1, tp2: sig.tp2,
+      confidence: sig.confidence, timeframe: INTERVAL,
+      openedAt: Date.now(), status: 'aberto', closedAt: null, exitPrice: null, pnlPct: null
+    });
+  }).catch(()=>{});
+}
+
+function closePayload(t, status, exitPrice){
   const sign = t.direction==='LONG' ? 1 : -1;
-  t.pnlPct = ((exitPrice - t.entry)/t.entry) * 100 * sign;
+  const pnlPct = ((exitPrice - t.entry)/t.entry) * 100 * sign;
+  return {status, closedAt: Date.now(), exitPrice, pnlPct};
 }
 
 function checkOpenTrades(symbol, high, low){
-  let changed = false;
   tradeLog.forEach(t=>{
-    if(t.symbol!==symbol || t.status==='tp2' || t.status==='stop' || t.status==='stop_be') return;
+    if(t.symbol!==symbol || t.status==='tp2' || t.status==='stop' || t.status==='tp1_win') return;
+    let update = null;
     if(t.direction==='LONG'){
       if(t.status==='aberto'){
-        if(low<=t.stop){ closeTradeAt(t,'stop', t.stop); changed=true; return; }
-        // ao bater o alvo 1, só passa a avaliar alvo 2/empate a partir da PRÓXIMA vela —
+        if(low<=t.stop){ update = closePayload(t,'stop', t.stop); }
+        // ao bater o alvo 1, só passa a avaliar alvo 2/recuo a partir da PRÓXIMA vela —
         // evita usar o mínimo desta mesma vela (que pode ter ocorrido antes do alvo 1 ser batido)
-        if(high>=t.tp1){ t.status='tp1'; changed=true; return; }
+        else if(high>=t.tp1){ update = {status:'tp1'}; }
       }
-      if(t.status==='tp1'){
-        if(high>=t.tp2){ closeTradeAt(t,'tp2', t.tp2); changed=true; }
-        else if(low<=t.entry){ closeTradeAt(t,'stop_be', t.entry); changed=true; }
+      if(!update && t.status==='tp1'){
+        if(high>=t.tp2){ update = closePayload(t,'tp2', t.tp2); }
+        // preço recuou até a entrada depois de já ter batido o alvo 1: o ganho do alvo 1
+        // fica travado (conta como lucro), NÃO é empate — só deixamos de perseguir o alvo 2
+        else if(low<=t.entry){ update = closePayload(t,'tp1_win', t.tp1); }
       }
     } else {
       if(t.status==='aberto'){
-        if(high>=t.stop){ closeTradeAt(t,'stop', t.stop); changed=true; return; }
-        if(low<=t.tp1){ t.status='tp1'; changed=true; return; }
+        if(high>=t.stop){ update = closePayload(t,'stop', t.stop); }
+        else if(low<=t.tp1){ update = {status:'tp1'}; }
       }
-      if(t.status==='tp1'){
-        if(low<=t.tp2){ closeTradeAt(t,'tp2', t.tp2); changed=true; }
-        else if(high>=t.entry){ closeTradeAt(t,'stop_be', t.entry); changed=true; }
+      if(!update && t.status==='tp1'){
+        if(low<=t.tp2){ update = closePayload(t,'tp2', t.tp2); }
+        else if(high>=t.entry){ update = closePayload(t,'tp1_win', t.tp1); }
       }
     }
+    if(update){
+      db.collection('trades').doc(t.id).update(update).catch(()=>{});
+    }
   });
-  if(changed){ saveTradeLog(); renderTradeLog(); }
 }
 
 const STATUS_LABEL = {
-  aberto: 'Aberto', tp1: 'Alvo 1 (seguindo)', tp2: 'Alvo 2 ✓', stop: 'Stop ✗', stop_be: 'Empate (BE)'
+  aberto: 'Aberto', tp1: 'Alvo 1 (seguindo)', tp2: 'Alvo 2 ✓', stop: 'Stop ✗', tp1_win: 'Alvo 1 ✓ (parcial)'
 };
 const STATUS_CLASS = {
-  aberto: '', tp1: 'up', tp2: 'up', stop: 'down', stop_be: ''
+  aberto: '', tp1: 'up', tp2: 'up', stop: 'down', tp1_win: 'up'
 };
 
 function renderTradeLog(){
@@ -1083,17 +1097,16 @@ function renderTradeLog(){
   const bodyEl = document.getElementById('tradeTableBody');
   if(!summaryEl || !bodyEl) return;
 
-  const closed = tradeLog.filter(t=>t.status==='tp2'||t.status==='stop'||t.status==='stop_be');
-  const wins = closed.filter(t=>t.status==='tp2').length;
+  const closed = tradeLog.filter(t=>t.status==='tp2'||t.status==='stop'||t.status==='tp1_win');
+  const wins = closed.filter(t=>t.status==='tp2'||t.status==='tp1_win').length;
   const losses = closed.filter(t=>t.status==='stop').length;
-  const be = closed.filter(t=>t.status==='stop_be').length;
   const winRate = (wins+losses)>0 ? (wins/(wins+losses)*100) : null;
   const avgPnl = closed.length>0 ? closed.reduce((s,t)=>s+t.pnlPct,0)/closed.length : null;
 
   summaryEl.innerHTML = `
     <div class="ts-item"><span class="ts-num">${tradeLog.length}</span><span class="ts-lbl">sinais registrados</span></div>
     <div class="ts-item"><span class="ts-num">${closed.length}</span><span class="ts-lbl">fechados</span></div>
-    <div class="ts-item"><span class="ts-num ${winRate==null?'':(winRate>=50?'up':'down')}">${winRate==null?'--':winRate.toFixed(0)+'%'}</span><span class="ts-lbl">taxa de acerto (${wins}✓ / ${losses}✗ / ${be} BE)</span></div>
+    <div class="ts-item"><span class="ts-num ${winRate==null?'':(winRate>=50?'up':'down')}">${winRate==null?'--':winRate.toFixed(0)+'%'}</span><span class="ts-lbl">taxa de acerto (${wins}✓ / ${losses}✗)</span></div>
     <div class="ts-item"><span class="ts-num ${avgPnl==null?'':(avgPnl>=0?'up':'down')}">${avgPnl==null?'--':(avgPnl>=0?'+':'')+avgPnl.toFixed(2)+'%'}</span><span class="ts-lbl">resultado médio por trade</span></div>
   `;
 
@@ -1132,7 +1145,6 @@ function sparklinePath(closes){
   closes.forEach((c,i)=>{
     const x=i*step, y=h-((c-min)/range)*h;
     d += (i===0?"M":"L")+x.toFixed(2)+","+y.toFixed(2)+" ";
-    
   });
   return d;
 }
@@ -1378,7 +1390,6 @@ document.getElementById('tfSel').addEventListener('change', e=> changeTimeframe(
 document.getElementById('sortSel').addEventListener('change', e=>{ sortMode = e.target.value; applySort(); });
 document.getElementById('refreshBtn').addEventListener('click', ()=>{ init(); });
 
-loadTradeLog();
 authBootstrap();
 })();
 </script>

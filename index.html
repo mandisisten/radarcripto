@@ -1015,21 +1015,30 @@ function handleKline(symbol, k){
     const sig = computeSignal(d);
     if(sig){
       d.signal = sig;
-      // registra no diário assim que o sinal aparecer no painel (não espera a vela fechar).
-      // d.lastLoggedSignal evita registrar de novo enquanto o MESMO sinal continuar ativo —
-      // se ele sumir (virar NEUTRO) e reaparecer depois, conta como um sinal novo de novo.
-      if(sig.direction!=="NEUTRO" && sig.confidence>=confMin){
-        if(sig.direction!==d.lastLoggedSignal){
-          pushLog(symbol, sig);
-          openTrade(symbol, sig, candle.t);
-          d.lastLoggedSignal = sig.direction;
-        }
-      } else {
-        d.lastLoggedSignal = null;
-      }
+      evaluateAndLogSignal(symbol, d);
     }
   }
   renderCard(symbol);
+}
+
+// Registra no diário assim que o sinal aparecer com confiança suficiente — usada tanto nos
+// ticks ao vivo quanto na carga inicial da página/troca de timeframe, pra não deixar passar
+// um sinal que já estava ativo no exato momento em que os dados foram carregados (antes de
+// qualquer atualização via WebSocket chegar). d.lastLoggedSignal evita registrar de novo
+// enquanto o MESMO sinal continuar ativo; se ele sumir (virar NEUTRO) e reaparecer depois,
+// conta como um sinal novo de novo.
+function evaluateAndLogSignal(symbol, d){
+  const sig = d.signal;
+  if(!sig || !d.candles.length) return;
+  if(sig.direction!=="NEUTRO" && sig.confidence>=confMin){
+    if(sig.direction!==d.lastLoggedSignal){
+      pushLog(symbol, sig);
+      openTrade(symbol, sig, d.candles[d.candles.length-1].t);
+      d.lastLoggedSignal = sig.direction;
+    }
+  } else {
+    d.lastLoggedSignal = null;
+  }
 }
 
 /* ========================= DIÁRIO DE TRADES ========================= */
@@ -1330,6 +1339,7 @@ async function changeTimeframe(newInterval){
         d.closes = candles.map(c=>c.c); d.highs = candles.map(c=>c.h); d.lows = candles.map(c=>c.l); d.volumes = candles.map(c=>c.v);
         d.lastPrice = candles[candles.length-1].c;
         d.signal = computeSignal(d);
+        if(d.signal) evaluateAndLogSignal(sym, d);
         renderCard(sym);
       }catch(e){ /* mantém dados anteriores se falhar */ }
     }));
@@ -1386,6 +1396,7 @@ async function init(){
         d.closes = candles.map(c=>c.c); d.highs = candles.map(c=>c.h); d.lows = candles.map(c=>c.l); d.volumes = candles.map(c=>c.v);
         d.lastPrice = candles[candles.length-1].c;
         d.signal = computeSignal(d);
+        if(d.signal) evaluateAndLogSignal(sym, d);
         renderCard(sym);
       }catch(e){ /* skip symbol on seed failure */ }
     }));

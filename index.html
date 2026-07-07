@@ -936,14 +936,20 @@ function scheduleConfirmRefresh(){
 }
 
 /* ========================= WEBSOCKET ========================= */
+const WS_STALE_MS = 45000; // se nenhuma mensagem chegar em 45s (com socket "aberto"), força reconexão
+let lastMsgAt = Date.now();
+let wsWatchdogTimer = null;
+
 function connectWS(symbols){
   if(ws){ try{ ws.onclose=null; ws.onerror=null; ws.close(); }catch(e){} }
   const streams = symbols.map(s=>s.toLowerCase()+"@kline_"+INTERVAL).join("/");
   const socket = new WebSocket(WS_BASE+streams);
   ws = socket;
+  lastMsgAt = Date.now();
   socket.onopen = ()=>{
     if(ws!==socket) return;
     reconnectAttempts=0;
+    lastMsgAt = Date.now();
     document.getElementById('wsDot').classList.add('on');
     document.getElementById('wsStatus').textContent = 'conectado (ao vivo)';
   };
@@ -957,12 +963,25 @@ function connectWS(symbols){
   socket.onerror = ()=>{ try{socket.close();}catch(e){} };
   socket.onmessage = (msg)=>{
     if(ws!==socket) return;
+    lastMsgAt = Date.now();
     let payload;
     try{ payload = JSON.parse(msg.data); }catch(e){ return; }
     const data = payload.data;
     if(!data || data.e!=="kline" || data.k.i!==INTERVAL) return;
     handleKline(data.s, data.k);
   };
+
+  // vigia: o navegador (aba em segundo plano, rede instável, etc.) às vezes deixa a conexão
+  // "zumbi" — o socket nunca dispara onclose, mas também para de entregar mensagens. Sem isso,
+  // a tela continuaria mostrando "conectado" indefinidamente e nenhum sinal novo seria detectado.
+  if(wsWatchdogTimer) clearInterval(wsWatchdogTimer);
+  wsWatchdogTimer = setInterval(()=>{
+    if(ws!==socket) return;
+    if(Date.now()-lastMsgAt > WS_STALE_MS){
+      try{ socket.close(); }catch(e){}
+      connectWS(symbols);
+    }
+  }, 15000);
 }
 
 function handleKline(symbol, k){
@@ -997,11 +1016,18 @@ function handleKline(symbol, k){
     d.closes = arr.map(x=>x.c); d.highs = arr.map(x=>x.h); d.lows = arr.map(x=>x.l); d.volumes = arr.map(x=>x.v);
     const sig = computeSignal(d);
     if(sig){
-      const prevDir = d.signal ? d.signal.direction : "NEUTRO";
-      d.signal = sig;
-      if(candle.closed && sig.direction!=="NEUTRO" && sig.confidence>=confMin && sig.direction!==prevDir){
-        pushLog(symbol, sig);
-        openTrade(symbol, sig, candle.t);
+      d.signal = sig; // usado pra exibir na tela — inclui prévia da vela ainda em formação
+      if(candle.closed){
+        // a direção "oficial" só é atualizada no fechamento da vela — evita que as prévias
+        // recalculadas a cada 2s (com a vela ainda aberta) "consumam" a mudança de direção
+        // antes de a vela fechar de verdade, o que fazia o sistema quase nunca detectar um
+        // sinal novo (sempre achava que a direção já era a mesma de instantes atrás).
+        const prevDir = d.lastClosedDirection || "NEUTRO";
+        if(sig.direction!=="NEUTRO" && sig.confidence>=confMin && sig.direction!==prevDir){
+          pushLog(symbol, sig);
+          openTrade(symbol, sig, candle.t);
+        }
+        d.lastClosedDirection = sig.direction;
       }
     }
   }

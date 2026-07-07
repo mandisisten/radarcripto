@@ -211,7 +211,7 @@
     <div class="log" id="log"><div class="log-empty">Aguardando sinais com confluência ≥ confiança mínima…</div></div>
 
     <h2 class="section">Diário de Trades</h2>
-    <p class="hint" style="margin:-6px 0 12px;">Todo sinal disparado entra aqui e é acompanhado em tempo real até bater o alvo ou o stop. Fica salvo só neste navegador.</p>
+    <p class="hint" style="margin:-6px 0 12px;">Todo sinal disparado entra aqui na hora e é acompanhado em tempo real (pelo preço do ativo) até bater o alvo ou o stop. Fica salvo na nuvem — sincroniza entre qualquer navegador ou dispositivo logado.</p>
     <div class="trade-summary" id="tradeSummary"></div>
     <div class="trade-table-wrap">
       <table class="trade-table">
@@ -1002,32 +1002,30 @@ function handleKline(symbol, k){
   d.lastPrice = candle.c;
   d.lastUpdate = Date.now();
 
-  // acompanha stop/alvos dos trades em aberto a cada vela FECHADA (usa máx/mín da vela).
-  // Só no fechamento porque a vela em formação manda máx/mín acumulados da vela inteira —
-  // checar a cada tick faria o sistema "lembrar" de um mínimo antigo (de antes de bater o
-  // alvo 1, por ex.) e fechar o trade errado. É uma aproximação: dentro de uma mesma vela
-  // fechada ainda não dá pra saber se o máximo ou o mínimo aconteceu primeiro.
-  if(candle.closed) checkOpenTrades(symbol, candle.h, candle.l);
+  // acompanha stop/alvos dos trades em aberto A CADA ATUALIZAÇÃO, usando o preço atual do
+  // ativo (não o máximo/mínimo acumulado da vela em formação — isso causava um bug em que o
+  // sistema "lembrava" de um mínimo antigo, de antes de bater o alvo 1, e fechava errado).
+  checkOpenTrades(symbol, candle.c);
 
-  // recompute indicators: full recompute on close, lightweight throttle otherwise
+  // recompute indicators: full recompute on close, lightweight throttle otherwise (a cada 2s)
   const now = Date.now();
   if(candle.closed || !d._lastCalc || now-d._lastCalc>2000){
     d._lastCalc = now;
     d.closes = arr.map(x=>x.c); d.highs = arr.map(x=>x.h); d.lows = arr.map(x=>x.l); d.volumes = arr.map(x=>x.v);
     const sig = computeSignal(d);
     if(sig){
-      d.signal = sig; // usado pra exibir na tela — inclui prévia da vela ainda em formação
-      if(candle.closed){
-        // a direção "oficial" só é atualizada no fechamento da vela — evita que as prévias
-        // recalculadas a cada 2s (com a vela ainda aberta) "consumam" a mudança de direção
-        // antes de a vela fechar de verdade, o que fazia o sistema quase nunca detectar um
-        // sinal novo (sempre achava que a direção já era a mesma de instantes atrás).
-        const prevDir = d.lastClosedDirection || "NEUTRO";
-        if(sig.direction!=="NEUTRO" && sig.confidence>=confMin && sig.direction!==prevDir){
+      d.signal = sig;
+      // registra no diário assim que o sinal aparecer no painel (não espera a vela fechar).
+      // d.lastLoggedSignal evita registrar de novo enquanto o MESMO sinal continuar ativo —
+      // se ele sumir (virar NEUTRO) e reaparecer depois, conta como um sinal novo de novo.
+      if(sig.direction!=="NEUTRO" && sig.confidence>=confMin){
+        if(sig.direction!==d.lastLoggedSignal){
           pushLog(symbol, sig);
           openTrade(symbol, sig, candle.t);
+          d.lastLoggedSignal = sig.direction;
         }
-        d.lastClosedDirection = sig.direction;
+      } else {
+        d.lastLoggedSignal = null;
       }
     }
   }
@@ -1035,13 +1033,15 @@ function handleKline(symbol, k){
 }
 
 /* ========================= DIÁRIO DE TRADES ========================= */
-// Registra cada sinal disparado e acompanha o preço em tempo real pra ver se bateu
-// stop ou alvo. Fica salvo no Firestore (mesmo banco do login) — sincroniza entre
-// qualquer navegador/dispositivo/usuário logado, e sobrevive a fechar o navegador.
-// ID do documento é determinístico (símbolo+vela+direção), então se dois usuários
-// estiverem com o app aberto ao mesmo tempo, ambos escrevem no MESMO registro em
-// vez de duplicar. Ao bater o Alvo 1, esse ganho já fica travado — mesmo que o preço
-// depois recue até a entrada, conta como lucro (Alvo 1 parcial), nunca como empate.
+// Registra o sinal assim que ele aparece no painel com confiança suficiente (não espera
+// a vela fechar) e acompanha stop/alvo 1/alvo 2 a cada atualização de preço em tempo real
+// (não usa mais máximo/mínimo acumulado da vela — só o preço atual do ativo a cada tick).
+// Fica salvo no Firestore (mesmo banco do login) — sincroniza entre qualquer navegador/
+// dispositivo/usuário logado, e sobrevive a fechar o navegador. ID do documento é
+// determinístico (símbolo+vela+direção): se dois usuários estiverem com o app aberto ao
+// mesmo tempo, ambos escrevem no MESMO registro em vez de duplicar. Ao bater o Alvo 1,
+// esse ganho já fica travado — mesmo que o preço depois recue até a entrada, conta como
+// lucro (Alvo 1 parcial), nunca como empate.
 const TRADE_LOG_LIMIT = 500; // cobre bem mais que 12h de sinais
 let tradeLog = [];
 let tradeLogUnsub = null;
@@ -1078,31 +1078,27 @@ function closePayload(t, status, exitPrice){
   return {status, closedAt: Date.now(), exitPrice, pnlPct};
 }
 
-function checkOpenTrades(symbol, high, low){
+function checkOpenTrades(symbol, price){
   tradeLog.forEach(t=>{
     if(t.symbol!==symbol || t.status==='tp2' || t.status==='stop' || t.status==='tp1_win') return;
     let update = null;
     if(t.direction==='LONG'){
       if(t.status==='aberto'){
-        if(low<=t.stop){ update = closePayload(t,'stop', t.stop); }
-        // ao bater o alvo 1, só passa a avaliar alvo 2/recuo a partir da PRÓXIMA vela —
-        // evita usar o mínimo desta mesma vela (que pode ter ocorrido antes do alvo 1 ser batido)
-        else if(high>=t.tp1){ update = {status:'tp1'}; }
-      }
-      if(!update && t.status==='tp1'){
-        if(high>=t.tp2){ update = closePayload(t,'tp2', t.tp2); }
+        if(price<=t.stop){ update = closePayload(t,'stop', price); }
+        else if(price>=t.tp1){ update = {status:'tp1'}; }
+      } else if(t.status==='tp1'){
+        if(price>=t.tp2){ update = closePayload(t,'tp2', price); }
         // preço recuou até a entrada depois de já ter batido o alvo 1: o ganho do alvo 1
         // fica travado (conta como lucro), NÃO é empate — só deixamos de perseguir o alvo 2
-        else if(low<=t.entry){ update = closePayload(t,'tp1_win', t.tp1); }
+        else if(price<=t.entry){ update = closePayload(t,'tp1_win', t.tp1); }
       }
     } else {
       if(t.status==='aberto'){
-        if(high>=t.stop){ update = closePayload(t,'stop', t.stop); }
-        else if(low<=t.tp1){ update = {status:'tp1'}; }
-      }
-      if(!update && t.status==='tp1'){
-        if(low<=t.tp2){ update = closePayload(t,'tp2', t.tp2); }
-        else if(high>=t.entry){ update = closePayload(t,'tp1_win', t.tp1); }
+        if(price>=t.stop){ update = closePayload(t,'stop', price); }
+        else if(price<=t.tp1){ update = {status:'tp1'}; }
+      } else if(t.status==='tp1'){
+        if(price<=t.tp2){ update = closePayload(t,'tp2', price); }
+        else if(price>=t.entry){ update = closePayload(t,'tp1_win', t.tp1); }
       }
     }
     if(update){

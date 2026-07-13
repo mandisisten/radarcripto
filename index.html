@@ -950,6 +950,7 @@ async function refreshConfirmations(){
       }catch(e){ /* mantém valores anteriores em caso de falha pontual */ }
       if(d.closes && d.closes.length){
         d.signal = computeSignal(d);
+        evaluateAndLogSignal(sym, d);
         renderCard(sym);
       }
     }));

@@ -1143,23 +1143,83 @@ function checkOpenTrades(symbol, price){
 }
 
 // Rede de segurança independente do WebSocket: a conexão em tempo real pode ficar instável
-// por horas (aba em segundo plano, rede, etc.) mesmo com o vigia de reconexão. Sem isso, um
-// trade podia ficar preso em "Aberto" o dia inteiro se o WS parasse de entregar preços pra
-// aquele símbolo específico. Busca o preço via REST (1 chamada só, todos os símbolos de uma
-// vez) a cada 20s e roda a mesma checagem de alvo/stop, só para os trades ainda em aberto.
+// por horas, ou o navegador pode ficar fechado por um bom tempo, mesmo com o vigia de
+// reconexão. Nesses casos, checar só o preço ATUAL contra stop/alvo é enganoso: o preço pode
+// ter batido o Alvo 1 e só depois caído até o stop enquanto ninguém estava monitorando, e
+// aquele lucro parcial seria perdido — o trade fecharia direto como stop. Por isso, em vez de
+// olhar só o preço mais recente, buscamos o histórico de candles de 1m desde a abertura do
+// trade e reconstruímos a sequência real de máx/mín, candle a candle, com a mesma lógica do
+// checkOpenTrades — assim nenhum Alvo 1 tocado durante um intervalo sem monitoramento passa
+// despercebido. Roda a cada 20s, só para os trades ainda em aberto.
 const TRADE_POLL_MS = 20000;
 let tradePollTimer = null;
+
+async function fetchTradeKlines(symbol, startTime){
+  let all = [];
+  let cursor = startTime;
+  const now = Date.now();
+  for(let guard=0; guard<10; guard++){ // cobre até ~10*1500min (~10 dias) de histórico se necessário
+    const url = `${REST}/fapi/v1/klines?symbol=${symbol}&interval=1m&startTime=${cursor}&limit=1500`;
+    const data = await fetch(url).then(r=>r.json());
+    if(!Array.isArray(data) || data.length===0) break;
+    all = all.concat(data);
+    const lastOpen = data[data.length-1][0];
+    if(data.length<1500 || lastOpen>=now-60000) break;
+    cursor = lastOpen+60000;
+  }
+  return all.map(k=>({t:k[0], h:parseFloat(k[2]), l:parseFloat(k[3])}));
+}
+
+// reconstrói o trade candle a candle (1m) desde a abertura, com a mesma máquina de estados
+// do checkOpenTrades — determinístico, então pode ser rodado do zero a qualquer momento.
+function replayTradeFromHistory(t, candles){
+  let status = 'aberto';
+  let result = null;
+  for(const c of candles){
+    let closedNow = null;
+    if(t.direction==='LONG'){
+      if(status==='aberto'){
+        if(c.l<=t.stop){ closedNow = closePayload(t,'stop', t.stop); }
+        else if(c.h>=t.tp1){ status='tp1'; }
+      }
+      if(!closedNow && status==='tp1'){
+        if(c.h>=t.tp2){ closedNow = closePayload(t,'tp2', t.tp2); }
+        else if(c.l<=t.entry){ closedNow = closePayload(t,'tp1_win', t.tp1); }
+      }
+    } else {
+      if(status==='aberto'){
+        if(c.h>=t.stop){ closedNow = closePayload(t,'stop', t.stop); }
+        else if(c.l<=t.tp1){ status='tp1'; }
+      }
+      if(!closedNow && status==='tp1'){
+        if(c.l<=t.tp2){ closedNow = closePayload(t,'tp2', t.tp2); }
+        else if(c.h>=t.entry){ closedNow = closePayload(t,'tp1_win', t.tp1); }
+      }
+    }
+    if(closedNow){ result = closedNow; break; }
+  }
+  return {status, result};
+}
+
 async function pollOpenTradesPrices(){
-  const openSymbols = new Set(tradeLog.filter(t=>t.status==='aberto'||t.status==='tp1').map(t=>t.symbol));
-  if(openSymbols.size===0) return;
-  try{
-    const prices = await fetch(`${REST}/fapi/v1/ticker/price`).then(r=>r.json());
-    const priceMap = new Map(prices.map(p=>[p.symbol, parseFloat(p.price)]));
-    openSymbols.forEach(sym=>{
-      const price = priceMap.get(sym);
-      if(price!=null) checkOpenTrades(sym, price);
-    });
-  }catch(e){ /* tenta de novo no próximo ciclo */ }
+  const openTrades = tradeLog.filter(t=>t.status==='aberto'||t.status==='tp1');
+  if(openTrades.length===0) return;
+  const chunks = [];
+  for(let i=0;i<openTrades.length;i+=4) chunks.push(openTrades.slice(i,i+4));
+  for(const chunk of chunks){
+    await Promise.all(chunk.map(async t=>{
+      try{
+        const candles = await fetchTradeKlines(t.symbol, t.openedAt);
+        if(!candles.length) return;
+        const {status, result} = replayTradeFromHistory(t, candles);
+        if(result){
+          await db.collection('trades').doc(t.id).update(result);
+        } else if(status!==t.status){
+          await db.collection('trades').doc(t.id).update({status});
+        }
+      }catch(e){ /* tenta de novo no próximo ciclo */ }
+    }));
+  }
 }
 function scheduleTradePoll(){
   if(tradePollTimer) clearInterval(tradePollTimer);
@@ -1517,6 +1577,7 @@ async function init(){
   setInterval(applySort, 8000);
   refreshConfirmations();
   scheduleConfirmRefresh();
+  pollOpenTradesPrices(); // reconcilia contra o histórico já na abertura da página, sem esperar os 20s
   scheduleTradePoll();
 }
 

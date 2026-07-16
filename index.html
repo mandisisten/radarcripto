@@ -822,7 +822,13 @@ function computeSignal(d){
   // resultado total de +179,7% pra +241,4%.
   const signalHour = new Date(d.candles[d.candles.length-1].t).getUTCHours();
   const badHourOk = signalHour<18;
-  const consistent = dirVotes>=3 && adxVal>=20 && atrPct>=atrFloor && badHourOk && direction!=="NEUTRO";
+  // bloqueia RSI<30 e RSI 55-70 no momento da entrada — faixas fracas achadas no "o que os
+  // vencedores têm em comum" (27% e 38% de acerto). Validado: com o bloqueio de horário já
+  // aplicado como base, a taxa de acerto sobe de 49,6% pra 54,3% e o resultado total de
+  // +240,7% pra +257,4%, com menos sinais.
+  const rsiNow = rsi14[last];
+  const badRsiOk = !(rsiNow<30 || (rsiNow>=55 && rsiNow<70));
+  const consistent = dirVotes>=3 && adxVal>=20 && atrPct>=atrFloor && badHourOk && badRsiOk && direction!=="NEUTRO";
   if(!consistent) direction = "NEUTRO";
 
   // ---- confirmações extras (filtro/modificador, fora da votação original) ----

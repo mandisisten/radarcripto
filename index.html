@@ -567,6 +567,12 @@ const CONFIRM_REFRESH_MS = 5*60*1000; // frequência de atualização de HTF/fun
 // nº de indicadores alinhados ou bônus de VWAP). 1.5% captura a maior parte desse ganho sem
 // cortar volume demais.
 const MIN_ATR_PCT = 1.5;
+// blue chips de volatilidade estruturalmente mais baixa — o piso de 1,5% de ATR/preço barrava
+// praticamente todo sinal deles (testado em backtest: BTC/ETH/BNB tiveram ZERO sinais em 45
+// dias com o piso padrão). Usam um piso próprio e mais baixo, validado no backtest com taxa
+// de acerto igual ou melhor que a produção (47,2% vs 41,7%) somando os 4 ativos.
+const LOW_VOL_MAJORS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT"];
+const MAJORS_ATR_FLOOR = 0.5;
 // principais criptomoedas (referência de mercado), usadas para garantir metade da lista com nomes conhecidos
 const CORE_MAJORS = [
   "BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","ADAUSDT","TRXUSDT",
@@ -806,9 +812,11 @@ function computeSignal(d){
   if(volConfirm) confidence = Math.min(95, confidence+8);
   if(adxVal<20) confidence = Math.min(confidence, 55); // mercado sem tendência clara -> penaliza
 
-  // filtro de volatilidade mínima (ATR/preço) — ver MIN_ATR_PCT acima pra justificativa dos números
+  // filtro de volatilidade mínima (ATR/preço) — ver MIN_ATR_PCT acima pra justificativa dos números.
+  // majors de baixa volatilidade (LOW_VOL_MAJORS) usam um piso próprio mais baixo (MAJORS_ATR_FLOOR).
   const atrPct = atr14[last]/price*100;
-  const consistent = dirVotes>=3 && adxVal>=20 && atrPct>=MIN_ATR_PCT && direction!=="NEUTRO";
+  const atrFloor = LOW_VOL_MAJORS.includes(d.meta.symbol) ? MAJORS_ATR_FLOOR : MIN_ATR_PCT;
+  const consistent = dirVotes>=3 && adxVal>=20 && atrPct>=atrFloor && direction!=="NEUTRO";
   if(!consistent) direction = "NEUTRO";
 
   // ---- confirmações extras (filtro/modificador, fora da votação original) ----
@@ -1426,7 +1434,8 @@ function renderCard(symbol){
 
     const extraChips = [];
     if(s.atrPct!=null){
-      extraChips.push(`<span class="chip ${s.atrPct>=MIN_ATR_PCT?'up':'down'}">ATR ${s.atrPct.toFixed(2)}%${s.atrPct<MIN_ATR_PCT?' (baixo)':''}</span>`);
+      const atrFloor = LOW_VOL_MAJORS.includes(symbol) ? MAJORS_ATR_FLOOR : MIN_ATR_PCT;
+      extraChips.push(`<span class="chip ${s.atrPct>=atrFloor?'up':'down'}">ATR ${s.atrPct.toFixed(2)}%${s.atrPct<atrFloor?' (baixo)':''}</span>`);
     }
     if(s.htfTrend){
       const arrow = s.htfTrend==='up'?'↑':s.htfTrend==='down'?'↓':'—';

@@ -1212,30 +1212,90 @@ async function fetchTradeKlines(symbol, startTime){
   return all.map(k=>({t:k[0], h:parseFloat(k[2]), l:parseFloat(k[3])}));
 }
 
+// quando um candle de 1m cruza mais de um nível relevante na MESMA vela (pavio violento), não
+// dá pra saber pela vela sozinha qual veio primeiro. Caso real que motivou isso: AKEUSDT bateu
+// Alvo 1 e Alvo 2 em menos de 1 segundo (15 mil negócios naquele minuto) e só depois caiu pro
+// stop no mesmo minuto — o candle sozinho levava a crer, por padrão, que foi stop primeiro.
+// Nesses casos raros, processa os negócios reais (tick a tick) daquele minuto específico, na
+// ordem cronológica verdadeira, com a mesma máquina de estados do checkOpenTrades — assim
+// resolve corretamente até transições encadeadas (aberto -> alvo1 -> alvo2 no mesmo minuto).
+async function resolveCandleTicks(t, candleStart, startStatus){
+  const candleEnd = candleStart + 60000;
+  let status = startStatus;
+  let cursor = candleStart;
+  for(let guard=0; guard<20; guard++){
+    let data;
+    try{
+      data = await fetch(`${REST}/fapi/v1/aggTrades?symbol=${t.symbol}&startTime=${cursor}&endTime=${candleEnd}&limit=1000`).then(r=>r.json());
+    }catch(e){ return {status, result:null}; }
+    if(!Array.isArray(data) || data.length===0) break;
+    for(const tr of data){
+      const p = parseFloat(tr.p);
+      if(t.direction==='LONG'){
+        if(status==='aberto'){
+          if(p<=t.stop) return {status, result:closePayload(t,'stop',t.stop)};
+          if(p>=t.tp1) status='tp1';
+        } else if(status==='tp1'){
+          if(p>=t.tp2) return {status, result:closePayload(t,'tp2',t.tp2)};
+          if(p<=t.entry) return {status, result:closePayload(t,'tp1_win',t.tp1)};
+        }
+      } else {
+        if(status==='aberto'){
+          if(p>=t.stop) return {status, result:closePayload(t,'stop',t.stop)};
+          if(p<=t.tp1) status='tp1';
+        } else if(status==='tp1'){
+          if(p<=t.tp2) return {status, result:closePayload(t,'tp2',t.tp2)};
+          if(p>=t.entry) return {status, result:closePayload(t,'tp1_win',t.tp1)};
+        }
+      }
+    }
+    const lastT = data[data.length-1].T;
+    if(data.length<1000 || lastT>=candleEnd) break;
+    cursor = lastT+1;
+  }
+  return {status, result:null}; // não fechou dentro dessa vela (ou não conseguiu buscar os negócios) — segue pras próximas velas normalmente
+}
+
 // reconstrói o trade candle a candle (1m) desde a abertura, com a mesma máquina de estados
 // do checkOpenTrades — determinístico, então pode ser rodado do zero a qualquer momento.
-function replayTradeFromHistory(t, candles){
+async function replayTradeFromHistory(t, candles){
   let status = 'aberto';
   let result = null;
   for(const c of candles){
     let closedNow = null;
     if(t.direction==='LONG'){
       if(status==='aberto'){
-        if(c.l<=t.stop){ closedNow = closePayload(t,'stop', t.stop); }
-        else if(c.h>=t.tp1){ status='tp1'; }
+        const hitStop = c.l<=t.stop, hitTp1 = c.h>=t.tp1;
+        if(hitStop && hitTp1){
+          const r = await resolveCandleTicks(t, c.t, 'aberto');
+          status = r.status; closedNow = r.result;
+        } else if(hitStop){ closedNow = closePayload(t,'stop', t.stop); }
+        else if(hitTp1){ status='tp1'; }
       }
       if(!closedNow && status==='tp1'){
-        if(c.h>=t.tp2){ closedNow = closePayload(t,'tp2', t.tp2); }
-        else if(c.l<=t.entry){ closedNow = closePayload(t,'tp1_win', t.tp1); }
+        const hitEntry = c.l<=t.entry, hitTp2 = c.h>=t.tp2;
+        if(hitEntry && hitTp2){
+          const r = await resolveCandleTicks(t, c.t, 'tp1');
+          status = r.status; closedNow = r.result;
+        } else if(hitTp2){ closedNow = closePayload(t,'tp2', t.tp2); }
+        else if(hitEntry){ closedNow = closePayload(t,'tp1_win', t.tp1); }
       }
     } else {
       if(status==='aberto'){
-        if(c.h>=t.stop){ closedNow = closePayload(t,'stop', t.stop); }
-        else if(c.l<=t.tp1){ status='tp1'; }
+        const hitStop = c.h>=t.stop, hitTp1 = c.l<=t.tp1;
+        if(hitStop && hitTp1){
+          const r = await resolveCandleTicks(t, c.t, 'aberto');
+          status = r.status; closedNow = r.result;
+        } else if(hitStop){ closedNow = closePayload(t,'stop', t.stop); }
+        else if(hitTp1){ status='tp1'; }
       }
       if(!closedNow && status==='tp1'){
-        if(c.l<=t.tp2){ closedNow = closePayload(t,'tp2', t.tp2); }
-        else if(c.h>=t.entry){ closedNow = closePayload(t,'tp1_win', t.tp1); }
+        const hitEntry = c.h>=t.entry, hitTp2 = c.l<=t.tp2;
+        if(hitEntry && hitTp2){
+          const r = await resolveCandleTicks(t, c.t, 'tp1');
+          status = r.status; closedNow = r.result;
+        } else if(hitTp2){ closedNow = closePayload(t,'tp2', t.tp2); }
+        else if(hitEntry){ closedNow = closePayload(t,'tp1_win', t.tp1); }
       }
     }
     if(closedNow){ result = closedNow; break; }
@@ -1253,7 +1313,7 @@ async function pollOpenTradesPrices(){
       try{
         const candles = await fetchTradeKlines(t.symbol, t.openedAt);
         if(!candles.length) return;
-        const {status, result} = replayTradeFromHistory(t, candles);
+        const {status, result} = await replayTradeFromHistory(t, candles);
         if(result){
           await db.collection('trades').doc(t.id).update(result);
         } else if(status!==t.status){

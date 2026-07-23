@@ -1076,14 +1076,19 @@ function handleKline(symbol, k){
 function evaluateAndLogSignal(symbol, d){
   const sig = d.signal;
   if(!sig || !d.candles.length) return;
-  if(sig.direction!=="NEUTRO" && sig.confidence>=confMin){
-    if(sig.direction!==d.lastLoggedSignal){
-      pushLog(symbol, sig);
-      openTrade(symbol, sig, d.candles[d.candles.length-1].t);
-      d.lastLoggedSignal = sig.direction;
-    }
-  } else {
+  // só "esquece" o último sinal logado quando a direção vira NEUTRO de verdade — não quando
+  // a confiança só oscila de leve perto do corte (ex: 81% -> 79% -> 81%) enquanto a direção
+  // continua a mesma. Sem isso, um sinal na borda do confMin duplicava a entrada a cada vela,
+  // registrando o MESMO movimento duas ou três vezes seguidas (caso real: OUSDT SHORT logado
+  // duas vezes em 5 minutos, quase no mesmo preço, 81% de confiança nas duas).
+  if(sig.direction==="NEUTRO"){
     d.lastLoggedSignal = null;
+    return;
+  }
+  if(sig.direction!==d.lastLoggedSignal && sig.confidence>=confMin){
+    pushLog(symbol, sig);
+    openTrade(symbol, sig, d.candles[d.candles.length-1].t);
+    d.lastLoggedSignal = sig.direction;
   }
 }
 

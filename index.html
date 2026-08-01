@@ -1073,7 +1073,7 @@ function handleKline(symbol, k){
 // qualquer atualização via WebSocket chegar). d.lastLoggedSignal evita registrar de novo
 // enquanto o MESMO sinal continuar ativo; se ele sumir (virar NEUTRO) e reaparecer depois,
 // conta como um sinal novo de novo.
-async function evaluateAndLogSignal(symbol, d){
+function evaluateAndLogSignal(symbol, d){
   const sig = d.signal;
   if(!sig || !d.candles.length) return;
   // só "esquece" o último sinal logado quando a direção vira NEUTRO de verdade — não quando
@@ -1086,14 +1086,9 @@ async function evaluateAndLogSignal(symbol, d){
     return;
   }
   if(sig.direction!==d.lastLoggedSignal && sig.confidence>=confMin){
-    // só marca como "logado" se realmente conseguiu registrar — se o book vetar o sinal
-    // (ver openTrade), tenta de novo no próximo recálculo, caso o book melhore antes do
-    // sinal sumir da tela
-    const logged = await openTrade(symbol, sig, d.candles[d.candles.length-1].t);
-    if(logged){
-      pushLog(symbol, sig);
-      d.lastLoggedSignal = sig.direction;
-    }
+    pushLog(symbol, sig);
+    openTrade(symbol, sig, d.candles[d.candles.length-1].t);
+    d.lastLoggedSignal = sig.direction;
   }
 }
 
@@ -1139,34 +1134,27 @@ async function fetchBookImbalance(symbol){
   }catch(e){ return null; }
 }
 
-// limiar validado com 96 trades reais coletados ao vivo (não dá pra testar em backtest — a
-// Binance não guarda livro de ofertas histórico): sinais com o book fortemente A FAVOR da
-// direção do sinal (>0,05) tiveram só 32,3% de acerto e resultado líquido NEGATIVO (-16,1%
-// somado), contra ~50-51% nos demais. Book a favor parece indicar posicionamento "cheio"
-// na mesma direção — sem mais combustível pro movimento continuar.
-const BOOK_ALIGNED_VETO = 0.05;
-
-// devolve true se o trade foi registrado (ou já existia), false se foi vetado pelo book —
-// nesse caso o chamador deve tentar de novo depois, caso o book melhore antes do sinal sumir
+// em 30/07 chegamos a usar esse desequilíbrio pra VETAR sinal (book muito a favor da direção
+// bloqueava o registro) — revertido em 01/08: nos 27 trades reais depois do deploy, a taxa de
+// acerto caiu de 43,5% pra 37,0% em vez de melhorar. Diferente de tudo mais no sistema, essa
+// regra nunca passou por backtest histórico de verdade (a Binance não guarda book do passado),
+// só uma simulação retrospectiva em cima de ~100 trades — que aparentemente pegou ruído, não
+// um padrão real e estável. Voltou a ser só coleta (sem influenciar se o sinal é registrado),
+// até termos uma validação mais sólida antes de usar de novo pra filtrar.
 async function openTrade(symbol, sig, candleOpenTime){
   const id = `${symbol}_${candleOpenTime}_${sig.direction}`;
   const ref = db.collection('trades').doc(id);
   try{
     const doc = await ref.get();
-    if(doc.exists) return true; // já registrado (por este ou outro cliente conectado)
+    if(doc.exists) return; // já registrado (por este ou outro cliente conectado)
     const bookImbalance = await fetchBookImbalance(symbol);
-    if(bookImbalance!=null){
-      const aligned = sig.direction==='LONG' ? bookImbalance : -bookImbalance;
-      if(aligned>BOOK_ALIGNED_VETO) return false; // book a favor demais — veta o sinal
-    }
     await ref.set({
       symbol, direction: sig.direction, entry: sig.entry, stop: sig.stop, tp1: sig.tp1, tp2: sig.tp2,
       confidence: sig.confidence, timeframe: INTERVAL,
       openedAt: Date.now(), status: 'aberto', closedAt: null, exitPrice: null, pnlPct: null,
       bookImbalance
     });
-    return true;
-  }catch(e){ return false; }
+  }catch(e){ /* tenta de novo no próximo sinal */ }
 }
 
 function closePayload(t, status, exitPrice){

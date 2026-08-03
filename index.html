@@ -24,6 +24,7 @@
   .controls label{display:flex;align-items:center;gap:6px;}
   .controls input[type=range]{width:100px;}
   .controls select,.controls button{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;cursor:pointer;}
+  .controls input[type=number]{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 6px;font-size:12px;width:60px;}
   .controls button:hover{border-color:var(--blue);}
   .disclaimer{background:#241a05;border-bottom:1px solid #4a3a0a;color:#f0c15c;font-size:11.5px;padding:7px 20px;line-height:1.5;}
   main{padding:16px 20px 60px;}
@@ -152,6 +153,12 @@
       <b id="confVal">80%</b>
     </label>
     <label><input type="checkbox" id="soundToggle"> 🔔 som</label>
+    <label>Capital (USDT)
+      <input type="number" id="capitalInput" min="0" step="10" value="100">
+    </label>
+    <label>Alavancagem
+      <input type="number" id="leverageInput" min="1" max="125" step="1" value="10">x
+    </label>
     <select id="sortSel">
       <option value="conf">Ordenar: Confiança</option>
       <option value="chg">Ordenar: Variação 24h</option>
@@ -584,6 +591,10 @@ const CORE_MAJORS = [
 
 let confMin = 80;
 let soundOn = false;
+// capital e alavancagem só pra calcular lucro/perda em $ na tela — não afeta sinal nem é
+// enviado pro Firestore, fica só salvo no navegador do usuário
+let capitalUSDT = parseFloat(localStorage.getItem('rc_capital')) || 100;
+let leverage = parseFloat(localStorage.getItem('rc_leverage')) || 10;
 let sortMode = "conf";
 const state = new Map(); // symbol -> data
 let ws = null;
@@ -1439,6 +1450,24 @@ function fmtPrice(p){
   return p.toLocaleString('en-US',{maximumFractionDigits:8});
 }
 
+// lucro/perda estimado em USDT e em % do capital, pra um alvo de preço dado — só matemática de
+// futuros perpétuos (notional = capital × alavancagem), não busca nada nem afeta o sinal
+function calcPnl(entry, target, direction, capital, lev){
+  const pctMove = (target-entry)/entry * (direction==='LONG'?1:-1);
+  return { usd: capital*lev*pctMove, pct: pctMove*lev*100 };
+}
+function fmtPnl(p){
+  const sign = p.usd>=0 ? '+' : '-';
+  return `${sign}$${Math.abs(p.usd).toFixed(2)} (${sign}${Math.abs(p.pct).toFixed(1)}%)`;
+}
+// preço de liquidação ESTIMADO (margem isolada, sem taxa de manutenção — a Binance exige API
+// key pra consultar a taxa de manutenção real por símbolo, o que quebraria o "sem API key" do
+// sistema). Na prática a liquidação real chega um pouco ANTES deste valor, então é uma
+// aproximação otimista, não o número exato da corretora
+function calcLiqPrice(entry, direction, lev){
+  return direction==='LONG' ? entry*(1-1/lev) : entry*(1+1/lev);
+}
+
 function sparklinePath(closes){
   const n = closes.length; if(n<2) return "";
   const w=100,h=34;
@@ -1478,6 +1507,11 @@ function buildCardSkeleton(symbol, meta){
       <div class="trade-row"><span class="lbl">Alvo 1</span><span id="tTp1-${symbol}">--</span></div>
       <div class="trade-row"><span class="lbl">Alvo 2</span><span id="tTp2-${symbol}">--</span></div>
       <div class="trade-row"><span class="lbl">R:R</span><span id="tRR-${symbol}">--</span></div>
+      <div class="trade-row"><span class="lbl">Perda no Stop</span><span id="tPnlStop-${symbol}" class="chg-neg">--</span></div>
+      <div class="trade-row"><span class="lbl">Lucro no Alvo 1</span><span id="tPnlTp1-${symbol}" class="chg-pos">--</span></div>
+      <div class="trade-row"><span class="lbl">Lucro no Alvo 2</span><span id="tPnlTp2-${symbol}" class="chg-pos">--</span></div>
+      <div class="trade-row"><span class="lbl">Liq. (estimado)</span><span id="tLiq-${symbol}">--</span></div>
+      <div id="tLiqWarn-${symbol}" style="display:none;color:var(--red);margin-top:3px;">⚠️ liquidaria antes do stop</div>
     </div>
     <div class="footer-card"><span>ATR14: <span id="atr-${symbol}">--</span></span><span id="upd-${symbol}">--</span></div>
   `;
@@ -1544,6 +1578,13 @@ function renderCard(symbol){
       document.getElementById('tTp2-'+symbol).textContent = fmtPrice(s.tp2);
       const risk = Math.abs(s.entry-s.stop), reward = Math.abs(s.tp2-s.entry);
       document.getElementById('tRR-'+symbol).textContent = '1 : '+(reward/risk).toFixed(2);
+      document.getElementById('tPnlStop-'+symbol).textContent = fmtPnl(calcPnl(s.entry, s.stop, s.direction, capitalUSDT, leverage));
+      document.getElementById('tPnlTp1-'+symbol).textContent = fmtPnl(calcPnl(s.entry, s.tp1, s.direction, capitalUSDT, leverage));
+      document.getElementById('tPnlTp2-'+symbol).textContent = fmtPnl(calcPnl(s.entry, s.tp2, s.direction, capitalUSDT, leverage));
+      const liqPrice = calcLiqPrice(s.entry, s.direction, leverage);
+      document.getElementById('tLiq-'+symbol).textContent = fmtPrice(liqPrice)+' (estimado)';
+      const liqBeforeStop = s.direction==='LONG' ? liqPrice>s.stop : liqPrice<s.stop;
+      document.getElementById('tLiqWarn-'+symbol).style.display = liqBeforeStop ? 'block' : 'none';
     } else {
       tradeBox.classList.remove('show');
     }
@@ -1698,6 +1739,18 @@ document.getElementById('confSlider').addEventListener('input', e=>{
   state.forEach((d,sym)=>renderCard(sym));
 });
 document.getElementById('soundToggle').addEventListener('change', e=> soundOn = e.target.checked);
+document.getElementById('capitalInput').value = capitalUSDT;
+document.getElementById('leverageInput').value = leverage;
+document.getElementById('capitalInput').addEventListener('input', e=>{
+  capitalUSDT = parseFloat(e.target.value)||0;
+  localStorage.setItem('rc_capital', capitalUSDT);
+  state.forEach((d,sym)=>renderCard(sym));
+});
+document.getElementById('leverageInput').addEventListener('input', e=>{
+  leverage = parseFloat(e.target.value)||1;
+  localStorage.setItem('rc_leverage', leverage);
+  state.forEach((d,sym)=>renderCard(sym));
+});
 document.getElementById('tfSel').addEventListener('change', e=> changeTimeframe(e.target.value));
 document.getElementById('sortSel').addEventListener('change', e=>{ sortMode = e.target.value; applySort(); });
 document.getElementById('refreshBtn').addEventListener('click', ()=>{ init(); });

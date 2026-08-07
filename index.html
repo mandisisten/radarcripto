@@ -873,22 +873,28 @@ function computeSignal(d){
     }
   }
 
-  // trade levels
+  // trade levels — 3 alvos, cada um batido sobe o "piso" de proteção pro degrau anterior em
+  // vez de fechar tudo (ver checkOpenTrades). Validado por backtest (90 dias/32 símbolos):
+  // taxa de acerto de 55,4% pra 69,9% (mais consistência, menos stop), ao custo de resultado
+  // total um pouco menor (+290,9% pra +231,5%, já que muitos trades travam no lucro do alvo 2
+  // em vez de chegar no alvo 3) — troca deliberada, escolhida pelo usuário.
   const atrVal = atr14[last];
-  let entry=price, stop=null, tp1=null, tp2=null;
+  let entry=price, stop=null, tp1=null, tp2=null, tp3=null;
   if(direction==="LONG"){
     stop = price - atrVal*1.3;
-    tp1 = price + atrVal*1.5;
-    tp2 = price + atrVal*2.6;
+    tp1 = price + atrVal*0.75;
+    tp2 = price + atrVal*1.5;
+    tp3 = price + atrVal*2.6;
   } else if(direction==="SHORT"){
     stop = price + atrVal*1.3;
-    tp1 = price - atrVal*1.5;
-    tp2 = price - atrVal*2.6;
+    tp1 = price - atrVal*0.75;
+    tp2 = price - atrVal*1.5;
+    tp3 = price - atrVal*2.6;
   }
 
   return {
     direction, confidence: Math.round(confidence), tags, price,
-    entry, stop, tp1, tp2, adx: adxVal, rsi: rsi14[last], volConfirm,
+    entry, stop, tp1, tp2, tp3, adx: adxVal, rsi: rsi14[last], volConfirm,
     atr: atrVal, atrPct,
     vwap: vwapVal, vwapBonus,
     fundingRate: d.fundingRate, fundingPenalized,
@@ -1160,7 +1166,7 @@ async function openTrade(symbol, sig, candleOpenTime){
     if(doc.exists) return; // já registrado (por este ou outro cliente conectado)
     const bookImbalance = await fetchBookImbalance(symbol);
     await ref.set({
-      symbol, direction: sig.direction, entry: sig.entry, stop: sig.stop, tp1: sig.tp1, tp2: sig.tp2,
+      symbol, direction: sig.direction, entry: sig.entry, stop: sig.stop, tp1: sig.tp1, tp2: sig.tp2, tp3: sig.tp3,
       confidence: sig.confidence, timeframe: INTERVAL,
       openedAt: Date.now(), status: 'aberto', closedAt: null, exitPrice: null, pnlPct: null,
       bookImbalance
@@ -1176,25 +1182,36 @@ function closePayload(t, status, exitPrice){
 
 function checkOpenTrades(symbol, price){
   tradeLog.forEach(t=>{
-    if(t.symbol!==symbol || t.status==='tp2' || t.status==='stop' || t.status==='tp1_win') return;
+    // 'tp2' fica na lista de status terminais só por causa de trades antigos (de antes dos 3
+    // alvos), onde esse status significava "fechou no alvo 2" — não é mais gerado a partir
+    // de agora, mas continua bloqueado pra nunca reabrir um trade antigo já fechado
+    if(t.symbol!==symbol || t.status==='tp2' || t.status==='tp3' || t.status==='stop' || t.status==='tp1_win' || t.status==='tp2_win') return;
     let update = null;
     if(t.direction==='LONG'){
       if(t.status==='aberto'){
         if(price<=t.stop){ update = closePayload(t,'stop', price); }
         else if(price>=t.tp1){ update = {status:'tp1'}; }
       } else if(t.status==='tp1'){
-        if(price>=t.tp2){ update = closePayload(t,'tp2', price); }
         // preço recuou até a entrada depois de já ter batido o alvo 1: o ganho do alvo 1
         // fica travado (conta como lucro), NÃO é empate — só deixamos de perseguir o alvo 2
+        if(price>=t.tp2){ update = {status:'tp2_reached'}; }
         else if(price<=t.entry){ update = closePayload(t,'tp1_win', t.tp1); }
+      } else if(t.status==='tp2_reached'){
+        // mesma lógica um degrau acima: bateu o alvo 3, fecha tudo; recuou até o alvo 1,
+        // trava o ganho do alvo 2 (não deixa cair até breakeven de novo)
+        if(price>=t.tp3){ update = closePayload(t,'tp3', price); }
+        else if(price<=t.tp1){ update = closePayload(t,'tp2_win', t.tp2); }
       }
     } else {
       if(t.status==='aberto'){
         if(price>=t.stop){ update = closePayload(t,'stop', price); }
         else if(price<=t.tp1){ update = {status:'tp1'}; }
       } else if(t.status==='tp1'){
-        if(price<=t.tp2){ update = closePayload(t,'tp2', price); }
+        if(price<=t.tp2){ update = {status:'tp2_reached'}; }
         else if(price>=t.entry){ update = closePayload(t,'tp1_win', t.tp1); }
+      } else if(t.status==='tp2_reached'){
+        if(price<=t.tp3){ update = closePayload(t,'tp3', price); }
+        else if(price>=t.tp1){ update = closePayload(t,'tp2_win', t.tp2); }
       }
     }
     if(update){
@@ -1255,16 +1272,22 @@ async function resolveCandleTicks(t, candleStart, startStatus){
           if(p<=t.stop) return {status, result:closePayload(t,'stop',t.stop)};
           if(p>=t.tp1) status='tp1';
         } else if(status==='tp1'){
-          if(p>=t.tp2) return {status, result:closePayload(t,'tp2',t.tp2)};
-          if(p<=t.entry) return {status, result:closePayload(t,'tp1_win',t.tp1)};
+          if(p>=t.tp2) status='tp2_reached';
+          else if(p<=t.entry) return {status, result:closePayload(t,'tp1_win',t.tp1)};
+        } else if(status==='tp2_reached'){
+          if(p>=t.tp3) return {status, result:closePayload(t,'tp3',t.tp3)};
+          if(p<=t.tp1) return {status, result:closePayload(t,'tp2_win',t.tp2)};
         }
       } else {
         if(status==='aberto'){
           if(p>=t.stop) return {status, result:closePayload(t,'stop',t.stop)};
           if(p<=t.tp1) status='tp1';
         } else if(status==='tp1'){
-          if(p<=t.tp2) return {status, result:closePayload(t,'tp2',t.tp2)};
-          if(p>=t.entry) return {status, result:closePayload(t,'tp1_win',t.tp1)};
+          if(p<=t.tp2) status='tp2_reached';
+          else if(p>=t.entry) return {status, result:closePayload(t,'tp1_win',t.tp1)};
+        } else if(status==='tp2_reached'){
+          if(p<=t.tp3) return {status, result:closePayload(t,'tp3',t.tp3)};
+          if(p>=t.tp1) return {status, result:closePayload(t,'tp2_win',t.tp2)};
         }
       }
     }
@@ -1296,8 +1319,16 @@ async function replayTradeFromHistory(t, candles){
         if(hitEntry && hitTp2){
           const r = await resolveCandleTicks(t, c.t, 'tp1');
           status = r.status; closedNow = r.result;
-        } else if(hitTp2){ closedNow = closePayload(t,'tp2', t.tp2); }
+        } else if(hitTp2){ status='tp2_reached'; }
         else if(hitEntry){ closedNow = closePayload(t,'tp1_win', t.tp1); }
+      }
+      if(!closedNow && status==='tp2_reached'){
+        const hitTp1Back = c.l<=t.tp1, hitTp3 = c.h>=t.tp3;
+        if(hitTp1Back && hitTp3){
+          const r = await resolveCandleTicks(t, c.t, 'tp2_reached');
+          status = r.status; closedNow = r.result;
+        } else if(hitTp3){ closedNow = closePayload(t,'tp3', t.tp3); }
+        else if(hitTp1Back){ closedNow = closePayload(t,'tp2_win', t.tp2); }
       }
     } else {
       if(status==='aberto'){
@@ -1313,8 +1344,16 @@ async function replayTradeFromHistory(t, candles){
         if(hitEntry && hitTp2){
           const r = await resolveCandleTicks(t, c.t, 'tp1');
           status = r.status; closedNow = r.result;
-        } else if(hitTp2){ closedNow = closePayload(t,'tp2', t.tp2); }
+        } else if(hitTp2){ status='tp2_reached'; }
         else if(hitEntry){ closedNow = closePayload(t,'tp1_win', t.tp1); }
+      }
+      if(!closedNow && status==='tp2_reached'){
+        const hitTp1Back = c.h>=t.tp1, hitTp3 = c.l<=t.tp3;
+        if(hitTp1Back && hitTp3){
+          const r = await resolveCandleTicks(t, c.t, 'tp2_reached');
+          status = r.status; closedNow = r.result;
+        } else if(hitTp3){ closedNow = closePayload(t,'tp3', t.tp3); }
+        else if(hitTp1Back){ closedNow = closePayload(t,'tp2_win', t.tp2); }
       }
     }
     if(closedNow){ result = closedNow; break; }
@@ -1323,7 +1362,7 @@ async function replayTradeFromHistory(t, candles){
 }
 
 async function pollOpenTradesPrices(){
-  const openTrades = tradeLog.filter(t=>t.status==='aberto'||t.status==='tp1');
+  const openTrades = tradeLog.filter(t=>t.status==='aberto'||t.status==='tp1'||t.status==='tp2_reached');
   if(openTrades.length===0) return;
   const chunks = [];
   for(let i=0;i<openTrades.length;i+=4) chunks.push(openTrades.slice(i,i+4));
@@ -1395,10 +1434,12 @@ async function clearAllTradeLog(){
 }
 
 const STATUS_LABEL = {
-  aberto: 'Aberto', tp1: 'Alvo 1 (seguindo)', tp2: 'Alvo 2 ✓', stop: 'Stop ✗', tp1_win: 'Alvo 1 ✓ (parcial)'
+  aberto: 'Aberto', tp1: 'Alvo 1 (seguindo)', tp2_reached: 'Alvo 2 (seguindo)', tp3: 'Alvo 3 ✓',
+  tp2: 'Alvo 2 ✓', stop: 'Stop ✗', tp1_win: 'Alvo 1 ✓ (parcial)', tp2_win: 'Alvo 2 ✓ (parcial)'
 };
 const STATUS_CLASS = {
-  aberto: '', tp1: 'up', tp2: 'up', stop: 'down', tp1_win: 'up'
+  aberto: '', tp1: 'up', tp2_reached: 'up', tp3: 'up',
+  tp2: 'up', stop: 'down', tp1_win: 'up', tp2_win: 'up'
 };
 
 function renderTradeLog(){
@@ -1412,9 +1453,12 @@ function renderTradeLog(){
   const myClearedAt = (currentUserData && currentUserData.tradesClearedAt) || 0;
   const tradeLogView = tradeLog.filter(t=>t.openedAt>myClearedAt);
 
-  const closed = tradeLogView.filter(t=>t.status==='tp2'||t.status==='stop'||t.status==='tp1_win');
-  const wins = closed.filter(t=>t.status==='tp2'||t.status==='tp1_win').length;
-  const losses = closed.filter(t=>t.status==='stop').length;
+  // "fechado" = tem pnlPct gravado (closePayload já rodou) — cobre tp2/stop/tp1_win (trades
+  // antigos, 2 alvos) e também tp3/tp2_win (3 alvos). 'tp1'/'tp2_reached'/'aberto' ainda estão
+  // em andamento, sem pnlPct, ficam de fora
+  const closed = tradeLogView.filter(t=>t.pnlPct!=null);
+  const wins = closed.filter(t=>t.pnlPct>=0).length;
+  const losses = closed.filter(t=>t.pnlPct<0).length;
   const winRate = (wins+losses)>0 ? (wins/(wins+losses)*100) : null;
   const avgPnl = closed.length>0 ? closed.reduce((s,t)=>s+t.pnlPct,0)/closed.length : null;
 
@@ -1506,10 +1550,12 @@ function buildCardSkeleton(symbol, meta){
       <div class="trade-row"><span class="lbl">Stop</span><span id="tStop-${symbol}">--</span></div>
       <div class="trade-row"><span class="lbl">Alvo 1</span><span id="tTp1-${symbol}">--</span></div>
       <div class="trade-row"><span class="lbl">Alvo 2</span><span id="tTp2-${symbol}">--</span></div>
+      <div class="trade-row"><span class="lbl">Alvo 3</span><span id="tTp3-${symbol}">--</span></div>
       <div class="trade-row"><span class="lbl">R:R</span><span id="tRR-${symbol}">--</span></div>
       <div class="trade-row"><span class="lbl">Perda no Stop</span><span id="tPnlStop-${symbol}" class="chg-neg">--</span></div>
       <div class="trade-row"><span class="lbl">Lucro no Alvo 1</span><span id="tPnlTp1-${symbol}" class="chg-pos">--</span></div>
       <div class="trade-row"><span class="lbl">Lucro no Alvo 2</span><span id="tPnlTp2-${symbol}" class="chg-pos">--</span></div>
+      <div class="trade-row"><span class="lbl">Lucro no Alvo 3</span><span id="tPnlTp3-${symbol}" class="chg-pos">--</span></div>
       <div class="trade-row"><span class="lbl">Liq. (estimado)</span><span id="tLiq-${symbol}">--</span></div>
       <div id="tLiqWarn-${symbol}" style="display:none;color:var(--red);margin-top:3px;">⚠️ liquidaria antes do stop</div>
     </div>
@@ -1576,11 +1622,13 @@ function renderCard(symbol){
       document.getElementById('tStop-'+symbol).textContent = fmtPrice(s.stop);
       document.getElementById('tTp1-'+symbol).textContent = fmtPrice(s.tp1);
       document.getElementById('tTp2-'+symbol).textContent = fmtPrice(s.tp2);
-      const risk = Math.abs(s.entry-s.stop), reward = Math.abs(s.tp2-s.entry);
+      document.getElementById('tTp3-'+symbol).textContent = fmtPrice(s.tp3);
+      const risk = Math.abs(s.entry-s.stop), reward = Math.abs(s.tp3-s.entry);
       document.getElementById('tRR-'+symbol).textContent = '1 : '+(reward/risk).toFixed(2);
       document.getElementById('tPnlStop-'+symbol).textContent = fmtPnl(calcPnl(s.entry, s.stop, s.direction, capitalUSDT, leverage));
       document.getElementById('tPnlTp1-'+symbol).textContent = fmtPnl(calcPnl(s.entry, s.tp1, s.direction, capitalUSDT, leverage));
       document.getElementById('tPnlTp2-'+symbol).textContent = fmtPnl(calcPnl(s.entry, s.tp2, s.direction, capitalUSDT, leverage));
+      document.getElementById('tPnlTp3-'+symbol).textContent = fmtPnl(calcPnl(s.entry, s.tp3, s.direction, capitalUSDT, leverage));
       const liqPrice = calcLiqPrice(s.entry, s.direction, leverage);
       document.getElementById('tLiq-'+symbol).textContent = fmtPrice(liqPrice)+' (estimado)';
       const liqBeforeStop = s.direction==='LONG' ? liqPrice>s.stop : liqPrice<s.stop;
@@ -1602,7 +1650,7 @@ function pushLog(symbol, sig){
     <span class="log-time">${new Date().toLocaleTimeString('pt-BR')}</span>
     <span class="badge ${sig.direction}">${sig.direction}</span>
     <b>${symbol.replace('USDT','')}</b>
-    <span style="color:var(--muted)">conf ${sig.confidence}% · entrada ${fmtPrice(sig.entry)} · stop ${fmtPrice(sig.stop)} · alvo ${fmtPrice(sig.tp2)}</span>
+    <span style="color:var(--muted)">conf ${sig.confidence}% · entrada ${fmtPrice(sig.entry)} · stop ${fmtPrice(sig.stop)} · alvo ${fmtPrice(sig.tp3)}</span>
   `;
   log.prepend(item);
   while(log.children.length>60) log.removeChild(log.lastChild);

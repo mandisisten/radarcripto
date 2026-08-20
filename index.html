@@ -57,6 +57,10 @@
   .footer-card{color:var(--muted);font-size:10.5px;margin-top:6px;display:flex;justify-content:space-between;}
   h2.section{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 10px;display:flex;align-items:center;gap:8px;}
   h2.section::after{content:'';flex:1;height:1px;background:var(--border);}
+  .tab-bar{display:flex;gap:8px;margin-bottom:16px;}
+  .tab-btn{background:var(--panel2);border:1px solid var(--border);color:var(--muted);border-radius:9px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;}
+  .tab-btn:hover{border-color:var(--blue);}
+  .tab-btn.active{background:var(--blue);color:#fff;border-color:var(--blue);}
   .log{background:var(--panel);border:1px solid var(--border);border-radius:10px;max-height:320px;overflow-y:auto;}
   .log-item{display:flex;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center;}
   .log-item:last-child{border-bottom:none;}
@@ -211,6 +215,10 @@
   </div>
 
   <div id="content" style="display:none">
+    <div class="tab-bar" id="viewTabs">
+      <button class="tab-btn active" id="tabAll" type="button">Todos os Pares</button>
+      <button class="tab-btn" id="tabMajors" type="button">⭐ Majors (BTC · ETH · SOL · BNB)</button>
+    </div>
     <h2 class="section">Painel de Ativos — Gráfico <span id="tfLabel">15m</span></h2>
     <div class="grid" id="grid"></div>
 
@@ -576,10 +584,12 @@ const CONFIRM_REFRESH_MS = 5*60*1000; // frequência de atualização de HTF/fun
 const MIN_ATR_PCT = 1.5;
 // blue chips de volatilidade estruturalmente mais baixa — o piso de 1,5% de ATR/preço barrava
 // praticamente todo sinal deles (testado em backtest: BTC/ETH/BNB tiveram ZERO sinais em 45
-// dias com o piso padrão). Usam um piso próprio e mais baixo, validado no backtest com taxa
-// de acerto igual ou melhor que a produção (47,2% vs 41,7%) somando os 4 ativos.
+// dias com o piso padrão). Usam um piso próprio e mais baixo. Validado por backtest de 180
+// dias em cada um dos 4 separadamente: baixar de 0,5% pra 0,2% multiplica os sinais (3x-7x)
+// SEM piorar a taxa de acerto (em alguns casos até melhora, ex. BNB 58,8%→65,6%) — resultado
+// consistente nos 4 ativos, não só um deles.
 const LOW_VOL_MAJORS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT"];
-const MAJORS_ATR_FLOOR = 0.5;
+const MAJORS_ATR_FLOOR = 0.2;
 // principais criptomoedas (referência de mercado), usadas para garantir metade da lista com nomes conhecidos
 const CORE_MAJORS = [
   "BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","ADAUSDT","TRXUSDT",
@@ -596,6 +606,9 @@ let soundOn = false;
 let capitalUSDT = parseFloat(localStorage.getItem('rc_capital')) || 100;
 let leverage = parseFloat(localStorage.getItem('rc_leverage')) || 10;
 let sortMode = "conf";
+// 'all' mostra todos os pares monitorados; 'majors' filtra pra só BTC/ETH/SOL/BNB (mesmo motor
+// de sinal, só a visualização muda — não duplica lógica nem estado)
+let activeTab = 'all';
 const state = new Map(); // symbol -> data
 let ws = null;
 let reconnectAttempts = 0;
@@ -1451,7 +1464,8 @@ function renderTradeLog(){
   // o checkOpenTrades/pollOpenTradesPrices continuam operando sobre o tradeLog completo,
   // só a exibição é filtrada por usuário
   const myClearedAt = (currentUserData && currentUserData.tradesClearedAt) || 0;
-  const tradeLogView = tradeLog.filter(t=>t.openedAt>myClearedAt);
+  let tradeLogView = tradeLog.filter(t=>t.openedAt>myClearedAt);
+  if(activeTab==='majors') tradeLogView = tradeLogView.filter(t=>LOW_VOL_MAJORS.includes(t.symbol));
 
   // "fechado" = tem pnlPct gravado (closePayload já rodou) — cobre tp2/stop/tp1_win (trades
   // antigos, 2 alvos) e também tp3/tp2_win (3 alvos). 'tp1'/'tp2_reached'/'aberto' ainda estão
@@ -1529,6 +1543,7 @@ function sparklinePath(closes){
 function buildCardSkeleton(symbol, meta){
   const div = document.createElement('div');
   div.className='card'; div.id='card-'+symbol;
+  div.dataset.major = LOW_VOL_MAJORS.includes(symbol) ? '1' : '0';
   div.innerHTML = `
     <div class="card-top">
       <div class="sym">${symbol.replace('USDT','')}<small>/USDT PERP</small></div>
@@ -1685,6 +1700,18 @@ function applySort(){
   cards.forEach(c=>grid.appendChild(c));
 }
 
+// alterna entre ver todos os pares ou só os 4 majors (BTC/ETH/SOL/BNB) — filtra a exibição
+// dos cards já existentes (sem recriar nada) e refiltra o diário de trades também
+function setActiveTab(tab){
+  activeTab = tab;
+  document.getElementById('tabAll').classList.toggle('active', tab==='all');
+  document.getElementById('tabMajors').classList.toggle('active', tab==='majors');
+  Array.from(document.getElementById('grid').children).forEach(card=>{
+    card.style.display = (tab==='majors' && card.dataset.major!=='1') ? 'none' : '';
+  });
+  renderTradeLog();
+}
+
 /* ========================= TIMEFRAME SWITCH ========================= */
 async function changeTimeframe(newInterval){
   if(newInterval===INTERVAL || state.size===0) return;
@@ -1748,6 +1775,7 @@ async function init(){
     state.set(meta.symbol, {meta, candles:[], closes:[],highs:[],lows:[],volumes:[], lastPrice:meta.lastPrice, signal:null, lastUpdate:Date.now()});
     grid.appendChild(buildCardSkeleton(meta.symbol, meta));
   }
+  setActiveTab(activeTab); // reaplica o filtro de aba nos cards recém-criados (init limpa o grid)
 
   // seed historical candles in parallel (limited concurrency to be gentle with rate limits)
   const symbols = top16.map(t=>t.symbol);
@@ -1802,6 +1830,8 @@ document.getElementById('leverageInput').addEventListener('input', e=>{
 document.getElementById('tfSel').addEventListener('change', e=> changeTimeframe(e.target.value));
 document.getElementById('sortSel').addEventListener('change', e=>{ sortMode = e.target.value; applySort(); });
 document.getElementById('refreshBtn').addEventListener('click', ()=>{ init(); });
+document.getElementById('tabAll').addEventListener('click', ()=> setActiveTab('all'));
+document.getElementById('tabMajors').addEventListener('click', ()=> setActiveTab('majors'));
 
 authBootstrap();
 })();

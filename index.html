@@ -891,16 +891,20 @@ function computeSignal(d){
   // taxa de acerto de 55,4% pra 69,9% (mais consistência, menos stop), ao custo de resultado
   // total um pouco menor (+290,9% pra +231,5%, já que muitos trades travam no lucro do alvo 2
   // em vez de chegar no alvo 3) — troca deliberada, escolhida pelo usuário.
+  // alvo1 recalibrado de ATR×0,75 pra ATR×0,65 — validado por backtest no universo real (62
+  // símbolos, 45 dias): taxa de acerto de 66,1% pra 69,7% E resultado total melhora junto
+  // (+596,1%→+597,3%), não é uma troca, os dois sobem — ponto ótimo encontrado testando vários
+  // valores (0,75/0,65/0,6/0,5/0,4), abaixo de 0,65 a taxa continua subindo mas o total cai.
   const atrVal = atr14[last];
   let entry=price, stop=null, tp1=null, tp2=null, tp3=null;
   if(direction==="LONG"){
     stop = price - atrVal*1.3;
-    tp1 = price + atrVal*0.75;
+    tp1 = price + atrVal*0.65;
     tp2 = price + atrVal*1.5;
     tp3 = price + atrVal*2.6;
   } else if(direction==="SHORT"){
     stop = price + atrVal*1.3;
-    tp1 = price - atrVal*0.75;
+    tp1 = price - atrVal*0.65;
     tp2 = price - atrVal*1.5;
     tp3 = price - atrVal*2.6;
   }

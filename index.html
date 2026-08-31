@@ -591,7 +591,12 @@ const MIN_ATR_PCT = 1.5;
 // de acerto, bem alinhados com os outros 4 (sem esse piso baixo, geravam quase zero sinal,
 // igual o problema original). Grupo usado pela aba "Majors" do painel.
 const LOW_VOL_MAJORS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","AVAXUSDT"];
-const MAJORS_ATR_FLOOR = 0.2;
+// recalibrado de 0,2% pra 0,15% depois: testado 0,2/0,15/0,1/0,05 nos 6 majors (90 dias) — o
+// ganho grande já tinha sido capturado indo de 0,5%→0,2%; daqui em diante os ganhos são
+// pequenos e decrescentes (+7% de sinais em 0,15%, taxa de acerto igual). Não fui além de
+// 0,15% porque em pisos menores (0,1%/0,05%) o stop fica tão apertado que taxas reais de
+// ida-e-volta na corretora (~0,08-0,10%) já superam o próprio movimento simulado como "vitória".
+const MAJORS_ATR_FLOOR = 0.15;
 // principais criptomoedas (referência de mercado), usadas para garantir metade da lista com nomes conhecidos
 const CORE_MAJORS = [
   "BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","ADAUSDT","TRXUSDT",

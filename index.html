@@ -217,7 +217,7 @@
   <div id="content" style="display:none">
     <div class="tab-bar" id="viewTabs">
       <button class="tab-btn active" id="tabAll" type="button">Todos os Pares</button>
-      <button class="tab-btn" id="tabMajors" type="button">⭐ Majors (BTC · ETH · SOL · BNB)</button>
+      <button class="tab-btn" id="tabMajors" type="button">⭐ Majors (BTC · ETH · SOL · BNB · XRP · AVAX)</button>
     </div>
     <h2 class="section">Painel de Ativos — Gráfico <span id="tfLabel">15m</span></h2>
     <div class="grid" id="grid"></div>
@@ -585,10 +585,12 @@ const MIN_ATR_PCT = 1.5;
 // blue chips de volatilidade estruturalmente mais baixa — o piso de 1,5% de ATR/preço barrava
 // praticamente todo sinal deles (testado em backtest: BTC/ETH/BNB tiveram ZERO sinais em 45
 // dias com o piso padrão). Usam um piso próprio e mais baixo. Validado por backtest de 180
-// dias em cada um dos 4 separadamente: baixar de 0,5% pra 0,2% multiplica os sinais (3x-7x)
-// SEM piorar a taxa de acerto (em alguns casos até melhora, ex. BNB 58,8%→65,6%) — resultado
-// consistente nos 4 ativos, não só um deles.
-const LOW_VOL_MAJORS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT"];
+// dias em cada um dos 4 originais separadamente: baixar de 0,5% pra 0,2% multiplica os sinais
+// (3x-7x) SEM piorar a taxa de acerto (em alguns casos até melhora, ex. BNB 58,8%→65,6%).
+// XRP e AVAX adicionados depois: mesma validação (90 dias) — 246 e 222 sinais, 70,7% e 68,0%
+// de acerto, bem alinhados com os outros 4 (sem esse piso baixo, geravam quase zero sinal,
+// igual o problema original). Grupo usado pela aba "Majors" do painel.
+const LOW_VOL_MAJORS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","AVAXUSDT"];
 const MAJORS_ATR_FLOOR = 0.2;
 // principais criptomoedas (referência de mercado), usadas para garantir metade da lista com nomes conhecidos
 const CORE_MAJORS = [
@@ -843,9 +845,13 @@ function computeSignal(d){
   // bloqueia sinais novos abertos entre 18h-24h UTC — no backtest (605 sinais/60 dias) essa
   // faixa teve só 26% de acerto e resultado médio negativo, contra 45-53% no resto do dia.
   // Validado: removendo essa janela, a taxa de acerto geral sobe de 45,0% pra 49,7% e o
-  // resultado total de +179,7% pra +241,4%.
+  // resultado total de +179,7% pra +241,4%. MAS esse teste foi feito no pool geral (altcoins
+  // voláteis) — pros majors (LOW_VOL_MAJORS) o bloqueio NÃO ajuda: testado 90 dias/6 símbolos,
+  // taxa de acerto ficou igual (71,0%→70,7%, dentro do ruído) e resultado total melhorou
+  // bastante liberando o horário (+146,5%→+172,7%, +26% de sinais a mais). Por isso majors
+  // operam o dia todo, sem essa restrição.
   const signalHour = new Date(d.candles[d.candles.length-1].t).getUTCHours();
-  const badHourOk = signalHour<18;
+  const badHourOk = LOW_VOL_MAJORS.includes(d.meta.symbol) || signalHour<18;
   // bloqueia RSI<30 e RSI 55-70 no momento da entrada — faixas fracas achadas no "o que os
   // vencedores têm em comum" (27% e 38% de acerto). Validado: com o bloqueio de horário já
   // aplicado como base, a taxa de acerto sobe de 49,6% pra 54,3% e o resultado total de

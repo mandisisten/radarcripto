@@ -1005,9 +1005,11 @@ async function fetchFundingRate(symbol){
 // (bem diferente do book de ofertas, que é só a fila de ordens visível e pode ser puxada/
 // manipulada na hora — por isso vetamos sinal com aquilo e não vamos repetir aqui: isto aqui é
 // só INFORMAÇÃO no card, não filtra nem muda nenhum sinal).
-async function fetchWhaleRatio(symbol){
+async function fetchWhaleRatio(symbol, period){
   try{
-    const data = await fetch(`${REST}/futures/data/topLongShortPositionRatio?symbol=${symbol}&period=15m&limit=1`).then(r=>r.json());
+    // período acompanha o timeframe selecionado no sistema (15m ou 4h) — os dois já são valores
+    // aceitos pela Binance pra esse endpoint, sem precisar de mapeamento
+    const data = await fetch(`${REST}/futures/data/topLongShortPositionRatio?symbol=${symbol}&period=${period}&limit=1`).then(r=>r.json());
     if(!Array.isArray(data) || !data.length) return null;
     return parseFloat(data[0].longAccount)*100; // % da posição total dos top traders que está comprada
   }catch(e){ return null; }
@@ -1024,7 +1026,7 @@ async function refreshConfirmations(){
       const d = state.get(sym);
       if(!d) return;
       try{
-        const [htfCandles, fundingRate, whaleRatio] = await Promise.all([seedHtf(sym, htfInterval), fetchFundingRate(sym), fetchWhaleRatio(sym)]);
+        const [htfCandles, fundingRate, whaleRatio] = await Promise.all([seedHtf(sym, htfInterval), fetchFundingRate(sym), fetchWhaleRatio(sym, INTERVAL)]);
         d.htfTrend = computeHtfTrend(htfCandles);
         d.fundingRate = fundingRate;
         d.whaleRatio = whaleRatio;

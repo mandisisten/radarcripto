@@ -29,7 +29,8 @@
   .disclaimer{background:#241a05;border-bottom:1px solid #4a3a0a;color:#f0c15c;font-size:11.5px;padding:7px 20px;line-height:1.5;}
   main{padding:16px 20px 60px;}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:22px;}
-  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px;position:relative;overflow:hidden;transition:border-color .3s;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px;position:relative;overflow:hidden;transition:border-color .3s;cursor:pointer;}
+  .card:hover{border-color:var(--blue);}
   .card.long{border-color:rgba(22,199,132,.55);}
   .card.short{border-color:rgba(234,57,67,.55);}
   .card-top{display:flex;justify-content:space-between;align-items:baseline;}
@@ -1574,6 +1575,10 @@ function buildCardSkeleton(symbol, meta){
   const div = document.createElement('div');
   div.className='card'; div.id='card-'+symbol;
   div.dataset.major = LOW_VOL_MAJORS.includes(symbol) ? '1' : '0';
+  div.title = 'Clique pra abrir o gráfico de velas na Binance';
+  // abre o gráfico de velas real da própria Binance Futures numa aba nova — mais simples e
+  // confiável que tentar renderizar velas do zero dentro do card
+  div.addEventListener('click', ()=> window.open(`https://www.binance.com/en/futures/${symbol}`, '_blank', 'noopener'));
   div.innerHTML = `
     <div class="card-top">
       <div class="sym">${symbol.replace('USDT','')}<small>/USDT PERP</small></div>

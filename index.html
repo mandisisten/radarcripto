@@ -1015,6 +1015,45 @@ async function fetchWhaleRatio(symbol, period){
   }catch(e){ return null; }
 }
 
+// complemento ao ratio de posicionamento (que é uma foto a cada 15m/4h): detecta NEGÓCIOS
+// GRANDES individuais em tempo quase real, via aggTrades (negociações reais já executadas,
+// não intenção/ordem que pode ser cancelada). Mais rápido (30s) e mais preciso (o negócio
+// específico) que o ratio agregado — os dois se complementam, um dá o quadro geral, o outro
+// pega o evento pontual. Só nos majors (WHALE_TRADE_POLL_MS abaixo), pra não estourar limite
+// de requisição da Binance rodando isso pra 50+ símbolos do pool dinâmico.
+const LARGE_TRADE_USD = 100000;
+const WHALE_TRADE_POLL_MS = 30*1000;
+async function fetchLargeTrades(symbol, sinceTs){
+  try{
+    const data = await fetch(`${REST}/fapi/v1/aggTrades?symbol=${symbol}&startTime=${sinceTs}&limit=1000`).then(r=>r.json());
+    if(!Array.isArray(data)) return [];
+    return data
+      .map(t=>({ price:parseFloat(t.p), qty:parseFloat(t.q), notional:parseFloat(t.p)*parseFloat(t.q), side: t.m?'SELL':'BUY', time:t.T }))
+      .filter(t=>t.notional>=LARGE_TRADE_USD);
+  }catch(e){ return []; }
+}
+let whaleTradeTimer = null;
+async function refreshLargeTrades(){
+  const now = Date.now();
+  await Promise.all(LOW_VOL_MAJORS.map(async sym=>{
+    const d = state.get(sym);
+    if(!d) return;
+    const since = d.lastTradeCheckTs || (now - 5*60*1000); // primeira vez: olha os últimos 5min
+    const trades = await fetchLargeTrades(sym, since);
+    d.lastTradeCheckTs = now;
+    if(trades.length){
+      // destaca o MAIOR negócio da janela, não só o mais recente — é o que mais importa
+      const biggest = trades.reduce((a,b)=> b.notional>a.notional ? b : a);
+      d.lastLargeTrade = biggest;
+    }
+    renderCard(sym);
+  }));
+}
+function scheduleWhaleTradeRefresh(){
+  if(whaleTradeTimer) clearInterval(whaleTradeTimer);
+  whaleTradeTimer = setInterval(refreshLargeTrades, WHALE_TRADE_POLL_MS);
+}
+
 let confirmRefreshTimer = null;
 async function refreshConfirmations(){
   const htfInterval = HTF_MAP[INTERVAL];
@@ -1593,6 +1632,9 @@ function buildCardSkeleton(symbol, meta){
     <div class="sub-row">
       <span>🐋 Top traders: <b id="whale-${symbol}">--</b></span>
     </div>
+    <div class="sub-row" id="bigTradeRow-${symbol}" style="display:none;">
+      <span>⚡ Negócio grande: <b id="bigTrade-${symbol}">--</b></span>
+    </div>
     <svg class="spark" viewBox="0 0 100 34" preserveAspectRatio="none"><path id="spark-${symbol}" fill="none" stroke="#4f8ff7" stroke-width="1.4"/></svg>
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <span class="badge NEUTRO" id="badge-${symbol}">NEUTRO</span>
@@ -1644,6 +1686,18 @@ function renderCard(symbol){
       whaleEl.textContent = '--';
       whaleEl.className = '';
     }
+  }
+
+  // maior negócio individual >= LARGE_TRADE_USD visto nos últimos ciclos (só majors) — evento
+  // pontual, complementa o ratio acima que é só a foto agregada
+  const bigTradeRow = document.getElementById('bigTradeRow-'+symbol);
+  const bigTradeEl = document.getElementById('bigTrade-'+symbol);
+  if(bigTradeRow && bigTradeEl && d.lastLargeTrade){
+    bigTradeRow.style.display = '';
+    const ageMin = Math.max(0, Math.round((Date.now()-d.lastLargeTrade.time)/60000));
+    const ageTxt = ageMin<1 ? 'agora' : `há ${ageMin}min`;
+    bigTradeEl.textContent = `$${(d.lastLargeTrade.notional/1000).toFixed(0)}K ${d.lastLargeTrade.side==='BUY'?'comprado':'vendido'} (${ageTxt})`;
+    bigTradeEl.className = d.lastLargeTrade.side==='BUY' ? 'chg-pos' : 'chg-neg';
   }
 
   const card = document.getElementById('card-'+symbol);
@@ -1857,6 +1911,8 @@ async function init(){
   setInterval(applySort, 8000);
   refreshConfirmations();
   scheduleConfirmRefresh();
+  refreshLargeTrades();
+  scheduleWhaleTradeRefresh();
   pollOpenTradesPrices(); // reconcilia contra o histórico já na abertura da página, sem esperar os 20s
   scheduleTradePoll();
 }

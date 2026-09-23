@@ -998,6 +998,20 @@ async function fetchFundingRate(symbol){
   }catch(e){ return null; }
 }
 
+// proporção comprado/vendido só das MAIORES contas da corretora (top traders), ponderada pelo
+// tamanho real da posição — dado público da Binance, não precisa de API key. É o proxy mais
+// confiável de "pra onde as baleias estão indo" que dá pra pegar sem serviço pago de terceiros
+// (bem diferente do book de ofertas, que é só a fila de ordens visível e pode ser puxada/
+// manipulada na hora — por isso vetamos sinal com aquilo e não vamos repetir aqui: isto aqui é
+// só INFORMAÇÃO no card, não filtra nem muda nenhum sinal).
+async function fetchWhaleRatio(symbol){
+  try{
+    const data = await fetch(`${REST}/futures/data/topLongShortPositionRatio?symbol=${symbol}&period=15m&limit=1`).then(r=>r.json());
+    if(!Array.isArray(data) || !data.length) return null;
+    return parseFloat(data[0].longAccount)*100; // % da posição total dos top traders que está comprada
+  }catch(e){ return null; }
+}
+
 let confirmRefreshTimer = null;
 async function refreshConfirmations(){
   const htfInterval = HTF_MAP[INTERVAL];
@@ -1009,15 +1023,16 @@ async function refreshConfirmations(){
       const d = state.get(sym);
       if(!d) return;
       try{
-        const [htfCandles, fundingRate] = await Promise.all([seedHtf(sym, htfInterval), fetchFundingRate(sym)]);
+        const [htfCandles, fundingRate, whaleRatio] = await Promise.all([seedHtf(sym, htfInterval), fetchFundingRate(sym), fetchWhaleRatio(sym)]);
         d.htfTrend = computeHtfTrend(htfCandles);
         d.fundingRate = fundingRate;
+        d.whaleRatio = whaleRatio;
       }catch(e){ /* mantém valores anteriores em caso de falha pontual */ }
       if(d.closes && d.closes.length){
         d.signal = computeSignal(d);
         evaluateAndLogSignal(sym, d);
-        renderCard(sym);
       }
+      renderCard(sym); // roda mesmo sem candle seedado ainda, pra mostrar o dado de baleias assim que chegar
     }));
   }
 }
@@ -1568,6 +1583,9 @@ function buildCardSkeleton(symbol, meta){
       <span>24h: <b id="chg-${symbol}" class="${meta.priceChangePercent>=0?'chg-pos':'chg-neg'}">${meta.priceChangePercent.toFixed(2)}%</b></span>
       <span id="vol-${symbol}">Vol: $${(meta.quoteVolume/1e6).toFixed(1)}M</span>
     </div>
+    <div class="sub-row">
+      <span>🐋 Top traders: <b id="whale-${symbol}">--</b></span>
+    </div>
     <svg class="spark" viewBox="0 0 100 34" preserveAspectRatio="none"><path id="spark-${symbol}" fill="none" stroke="#4f8ff7" stroke-width="1.4"/></svg>
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <span class="badge NEUTRO" id="badge-${symbol}">NEUTRO</span>
@@ -1608,6 +1626,18 @@ function renderCard(symbol){
   }
   const sparkEl = document.getElementById('spark-'+symbol);
   if(sparkEl && d.closes) sparkEl.setAttribute('d', sparklinePath(d.closes.slice(-40)));
+
+  // % da posição dos top traders que está comprada — só informação, independe de ter sinal
+  const whaleEl = document.getElementById('whale-'+symbol);
+  if(whaleEl){
+    if(d.whaleRatio!=null){
+      whaleEl.textContent = d.whaleRatio.toFixed(1)+'% comprado';
+      whaleEl.className = d.whaleRatio>=50 ? 'chg-pos' : 'chg-neg';
+    } else {
+      whaleEl.textContent = '--';
+      whaleEl.className = '';
+    }
+  }
 
   const card = document.getElementById('card-'+symbol);
   const badge = document.getElementById('badge-'+symbol);

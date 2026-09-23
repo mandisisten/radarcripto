@@ -1017,12 +1017,16 @@ async function fetchWhaleRatio(symbol, period){
 
 // complemento ao ratio de posicionamento (que é uma foto a cada 15m/4h): detecta NEGÓCIOS
 // GRANDES individuais em tempo quase real, via aggTrades (negociações reais já executadas,
-// não intenção/ordem que pode ser cancelada). Mais rápido (30s) e mais preciso (o negócio
+// não intenção/ordem que pode ser cancelada). Mais rápido e mais preciso (o negócio
 // específico) que o ratio agregado — os dois se complementam, um dá o quadro geral, o outro
-// pega o evento pontual. Só nos majors (WHALE_TRADE_POLL_MS abaixo), pra não estourar limite
-// de requisição da Binance rodando isso pra 50+ símbolos do pool dinâmico.
+// pega o evento pontual. aggTrades pesa 20 por chamada, limite de 2400/min por IP (doc da
+// Binance) — rodar em TODOS os ~55-60 símbolos monitorados no mesmo ritmo rápido dos majors
+// estouraria quase o limite inteiro sozinho, então os majors ficam num ciclo rápido (30s,
+// ~240 de peso/min) e o resto do pool dinâmico num ciclo mais lento (2min, ~550 de peso/min
+// pra ~55 símbolos) — ainda bem mais rápido que os 5min do ratio, com folga de sobra no limite.
 const LARGE_TRADE_USD = 100000;
 const WHALE_TRADE_POLL_MS = 30*1000;
+const WHALE_TRADE_POOL_POLL_MS = 2*60*1000;
 async function fetchLargeTrades(symbol, sinceTs){
   try{
     const data = await fetch(`${REST}/fapi/v1/aggTrades?symbol=${symbol}&startTime=${sinceTs}&limit=1000`).then(r=>r.json());
@@ -1032,26 +1036,40 @@ async function fetchLargeTrades(symbol, sinceTs){
       .filter(t=>t.notional>=LARGE_TRADE_USD);
   }catch(e){ return []; }
 }
-let whaleTradeTimer = null;
-async function refreshLargeTrades(){
+async function refreshLargeTradesFor(symbols){
   const now = Date.now();
-  await Promise.all(LOW_VOL_MAJORS.map(async sym=>{
-    const d = state.get(sym);
-    if(!d) return;
-    const since = d.lastTradeCheckTs || (now - 5*60*1000); // primeira vez: olha os últimos 5min
-    const trades = await fetchLargeTrades(sym, since);
-    d.lastTradeCheckTs = now;
-    if(trades.length){
-      // destaca o MAIOR negócio da janela, não só o mais recente — é o que mais importa
-      const biggest = trades.reduce((a,b)=> b.notional>a.notional ? b : a);
-      d.lastLargeTrade = biggest;
-    }
-    renderCard(sym);
-  }));
+  const chunks = [];
+  for(let i=0;i<symbols.length;i+=4) chunks.push(symbols.slice(i,i+4));
+  for(const chunk of chunks){
+    await Promise.all(chunk.map(async sym=>{
+      const d = state.get(sym);
+      if(!d) return;
+      const since = d.lastTradeCheckTs || (now - 5*60*1000); // primeira vez: olha os últimos 5min
+      const trades = await fetchLargeTrades(sym, since);
+      d.lastTradeCheckTs = now;
+      if(trades.length){
+        // destaca o MAIOR negócio da janela, não só o mais recente — é o que mais importa
+        const biggest = trades.reduce((a,b)=> b.notional>a.notional ? b : a);
+        d.lastLargeTrade = biggest;
+      }
+      renderCard(sym);
+    }));
+  }
 }
+let whaleTradeTimer = null;
+async function refreshLargeTrades(){ await refreshLargeTradesFor(LOW_VOL_MAJORS); }
 function scheduleWhaleTradeRefresh(){
   if(whaleTradeTimer) clearInterval(whaleTradeTimer);
   whaleTradeTimer = setInterval(refreshLargeTrades, WHALE_TRADE_POLL_MS);
+}
+let whaleTradePoolTimer = null;
+async function refreshLargeTradesPool(){
+  const rest = Array.from(state.keys()).filter(s=>!LOW_VOL_MAJORS.includes(s));
+  await refreshLargeTradesFor(rest);
+}
+function scheduleWhaleTradePoolRefresh(){
+  if(whaleTradePoolTimer) clearInterval(whaleTradePoolTimer);
+  whaleTradePoolTimer = setInterval(refreshLargeTradesPool, WHALE_TRADE_POOL_POLL_MS);
 }
 
 let confirmRefreshTimer = null;
@@ -1913,6 +1931,8 @@ async function init(){
   scheduleConfirmRefresh();
   refreshLargeTrades();
   scheduleWhaleTradeRefresh();
+  refreshLargeTradesPool();
+  scheduleWhaleTradePoolRefresh();
   pollOpenTradesPrices(); // reconcilia contra o histórico já na abertura da página, sem esperar os 20s
   scheduleTradePoll();
 }
